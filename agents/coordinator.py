@@ -418,3 +418,76 @@ class PaperReaderCoordinator:
                 "file_type": parsed_doc.file_type
             }
         return None
+    
+    def translate_stream(self, max_chunks: int = 50):
+        """
+        流式翻译论文全文
+        
+        Args:
+            max_chunks: 最大翻译分块数（防止过长文档）
+            
+        Yields:
+            str: 翻译后的文本片段
+        """
+        # 获取文档分块
+        chunks = self.vector_store.get_all_chunks()
+        
+        if not chunks:
+            yield "❌ 未找到文档内容，请先上传并分析论文。"
+            return
+        
+        # 限制分块数量
+        if len(chunks) > max_chunks:
+            chunks = chunks[:max_chunks]
+            yield f"⚠️ 论文较长，仅翻译前 {max_chunks} 个段落。\n\n"
+        
+        yield f"📝 开始翻译论文（共 {len(chunks)} 个段落）...\n\n"
+        yield "---\n\n"
+        
+        # 翻译提示模板
+        translate_prompt = """你是一位专业的学术翻译专家。请将以下英文学术论文段落翻译成中文。
+
+要求：
+1. 保持学术风格，用语严谨
+2. 专业术语使用标准中文译法，首次出现时可标注英文原词
+3. 保持原文的段落结构和逻辑
+4. 数学公式、变量名保持原样
+5. 直接输出翻译结果，不要添加解释
+
+---
+原文：
+{text}
+---
+
+中文翻译："""
+        
+        # 逐段翻译
+        for i, chunk in enumerate(chunks, 1):
+            text = chunk.page_content.strip()
+            if not text:
+                continue
+            
+            # 跳过太短的内容（可能是页码、图注等）
+            if len(text) < 20:
+                continue
+            
+            yield f"### 段落 {i}\n\n"
+            yield f"**原文：**\n> {text[:200]}{'...' if len(text) > 200 else ''}\n\n"
+            yield f"**译文：**\n"
+            
+            # 调用 LLM 翻译
+            prompt = translate_prompt.format(text=text)
+            
+            try:
+                for token in self.llm_service.stream_chat(
+                    user_message=prompt,
+                    system_prompt="你是专业的学术论文翻译专家。",
+                    chat_history=[]  # 翻译不需要历史上下文
+                ):
+                    yield token
+            except Exception as e:
+                yield f"\n\n[翻译出错: {str(e)}]"
+            
+            yield "\n\n---\n\n"
+        
+        yield "\n✅ 翻译完成！"

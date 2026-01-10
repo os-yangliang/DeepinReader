@@ -1,13 +1,16 @@
 """
 论文阅读多智能体系统 - FastAPI 后端 API
 """
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 import os
+import shutil
+import uuid
 import sys
 import json
 import asyncio
@@ -40,13 +43,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 确保上传目录存在
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# 挂载静态文件目录，用于访问上传的 PDF
+app.mount("/api/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
 # 初始化认证服务
 auth_service = AuthService()
 
 # OAuth2 Scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
 
-# 全局状态
+# 全局状态 - 改为基于会话的状态管理
 class AppState:
     def __init__(self):
         self.coordinator: Optional[PaperReaderCoordinator] = None
@@ -119,7 +129,26 @@ class AppState:
         except Exception as e:
             logger.exception("保存对话消息失败: %s", e)
 
-state = AppState()
+# 会话管理器：内存中的简单 Session Store
+# 注意：在多进程环境（如 gunicorn）中，这仍然是进程隔离的。
+# 生产环境建议使用 Redis 替代这个字典。
+class SessionManager:
+    def __init__(self):
+        self.sessions: Dict[str, AppState] = {}
+        
+    def get_state(self, session_id: str) -> AppState:
+        if session_id not in self.sessions:
+            logger.info(f"创建新会话状态: {session_id}")
+            self.sessions[session_id] = AppState()
+        return self.sessions[session_id]
+
+session_manager = SessionManager()
+
+# 依赖注入：获取当前会话状态
+async def get_app_state(x_session_id: Optional[str] = Header(None)) -> AppState:
+    # 如果没有提供 Session ID，使用默认的 "default"（兼容旧客户端，但不推荐）
+    session_id = x_session_id or "default"
+    return session_manager.get_state(session_id)
 
 
 # 请求/响应模型
@@ -205,7 +234,7 @@ async def root():
     return {"message": "论文阅读助手 API", "version": "2.0.0"}
 
 @app.get("/api/status")
-async def get_status():
+async def get_status(state: AppState = Depends(get_app_state)):
     """获取系统状态"""
     return {
         "is_document_loaded": state.is_document_loaded,
@@ -213,7 +242,7 @@ async def get_status():
     }
 
 @app.get("/api/document", response_model=DocumentInfoResponse)
-async def get_document_info():
+async def get_document_info(state: AppState = Depends(get_app_state)):
     """获取当前文档信息"""
     return DocumentInfoResponse(
         is_loaded=state.is_document_loaded,
@@ -223,7 +252,7 @@ async def get_document_info():
     )
 
 @app.post("/api/upload", response_model=AnalysisResponse)
-async def upload_and_analyze(file: UploadFile = File(...)):
+async def upload_and_analyze(file: UploadFile = File(...), state: AppState = Depends(get_app_state)):
     """上传并分析论文"""
     
     try:
@@ -239,18 +268,30 @@ async def upload_and_analyze(file: UploadFile = File(...)):
         
         state.ensure_coordinator()
         
-        # 读取文件内容
+        # 1. 读取文件内容到内存用于分析
         file_bytes = await file.read()
 
-        # 简单的大小限制（避免超大文件导致内存/磁盘压力）
+        # 简单的大小限制
         max_bytes = int(MAX_FILE_SIZE_MB * 1024 * 1024)
         if len(file_bytes) > max_bytes:
             raise HTTPException(
                 status_code=413,
                 detail=f"文件过大：{len(file_bytes) / (1024 * 1024):.2f}MB，最大支持 {MAX_FILE_SIZE_MB}MB"
             )
+            
+        # 2. 保存文件到磁盘 (用于前端预览)
+        # 使用 UUID 防止文件名冲突，但保留原始扩展名
+        file_id = str(uuid.uuid4())
+        save_filename = f"{file_id}{ext}"
+        save_path = os.path.join(UPLOAD_DIR, save_filename)
         
-        # 处理文档
+        with open(save_path, "wb") as f:
+            f.write(file_bytes)
+            
+        # 生成访问 URL
+        file_url = f"/api/uploads/{save_filename}"
+        
+        # 3. 处理文档
         result = state.coordinator.process_document(
             file_bytes=file_bytes,
             filename=filename
@@ -271,10 +312,12 @@ async def upload_and_analyze(file: UploadFile = File(...)):
                     "page_count": doc_info['page_count'],
                     "word_count": doc_info['word_count'],
                     "document_id": doc_info['document_id'],
-                    "processing_time": result.total_time
+                    "processing_time": result.total_time,
+                    "file_url": file_url # 新增：返回文件 URL
                 }
             
             # 保存到历史记录（持久化到 ChromaDB）
+            # 注意：这里我们可能需要扩展 HistoryStore 来保存 file_url，或者简单点先不持久化 URL
             state.save_to_history(state.document_info, result.structure_info, result.summary)
             
             return AnalysisResponse(
@@ -304,7 +347,7 @@ async def upload_and_analyze(file: UploadFile = File(...)):
         )
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, state: AppState = Depends(get_app_state)):
     """聊天问答"""
     
     if not request.message.strip():
@@ -338,7 +381,7 @@ async def chat(request: ChatRequest):
         )
 
 @app.post("/api/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest, state: AppState = Depends(get_app_state)):
     """流式聊天问答"""
     
     if not request.message.strip():
@@ -377,7 +420,7 @@ async def chat_stream(request: ChatRequest):
     )
 
 @app.get("/api/suggestions")
-async def get_suggestions():
+async def get_suggestions(state: AppState = Depends(get_app_state)):
     """获取建议问题"""
     if not state.is_document_loaded:
         return {"questions": []}
@@ -387,8 +430,36 @@ async def get_suggestions():
     
     return {"questions": questions}
 
+@app.post("/api/translate/stream")
+async def translate_stream(state: AppState = Depends(get_app_state)):
+    """流式翻译论文全文"""
+    
+    if not state.is_document_loaded:
+        raise HTTPException(status_code=400, detail="请先上传并解析论文文档")
+    
+    state.ensure_coordinator()
+    
+    async def generate():
+        try:
+            for chunk in state.coordinator.translate_stream():
+                yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.01)
+            
+            yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+
 @app.post("/api/clear")
-async def clear_chat():
+async def clear_chat(state: AppState = Depends(get_app_state)):
     """清除聊天历史"""
     if state.coordinator:
         state.coordinator.clear_chat_history()
@@ -398,7 +469,7 @@ async def clear_chat():
     return {"success": True}
 
 @app.delete("/api/document")
-async def clear_document():
+async def clear_document(state: AppState = Depends(get_app_state)):
     """清除当前文档"""
     state.is_document_loaded = False
     state.current_summary = ""
@@ -411,7 +482,7 @@ async def clear_document():
     return {"success": True}
 
 @app.get("/api/history", response_model=HistoryListResponse)
-async def get_analysis_history():
+async def get_analysis_history(state: AppState = Depends(get_app_state)):
     """获取分析历史记录列表（从 ChromaDB 读取）"""
     if not state.history_store:
         return HistoryListResponse(history=[], current_id=None)
@@ -440,7 +511,7 @@ async def get_analysis_history():
         return HistoryListResponse(history=[], current_id=None)
 
 @app.get("/api/history/{history_id}")
-async def get_history_detail(history_id: str):
+async def get_history_detail(history_id: str, state: AppState = Depends(get_app_state)):
     """获取指定历史记录详情"""
     if not state.history_store:
         raise HTTPException(status_code=500, detail="历史记录服务不可用")
@@ -451,7 +522,7 @@ async def get_history_detail(history_id: str):
     return item
 
 @app.post("/api/history/{history_id}/load")
-async def load_history_item(history_id: str):
+async def load_history_item(history_id: str, state: AppState = Depends(get_app_state)):
     """加载历史记录到当前状态"""
     if not state.history_store:
         raise HTTPException(status_code=500, detail="历史记录服务不可用")
@@ -505,7 +576,7 @@ async def load_history_item(history_id: str):
     }
 
 @app.delete("/api/history/{history_id}")
-async def delete_history_item(history_id: str):
+async def delete_history_item(history_id: str, state: AppState = Depends(get_app_state)):
     """删除指定历史记录"""
     if not state.history_store:
         raise HTTPException(status_code=500, detail="历史记录服务不可用")
@@ -540,7 +611,7 @@ async def delete_history_item(history_id: str):
     return {"success": True}
 
 @app.get("/api/history/{history_id}/chat")
-async def get_history_chat(history_id: str):
+async def get_history_chat(history_id: str, state: AppState = Depends(get_app_state)):
     """获取指定历史记录的对话历史"""
     if not state.history_store:
         return {"chat_history": []}

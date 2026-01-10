@@ -16,9 +16,19 @@ const routes = [
     component: () => import('./views/Analyze.vue')
   },
   {
+    path: '/translate',
+    name: 'Translate',
+    component: () => import('./views/Translate.vue')
+  },
+  {
     path: '/chat',
     name: 'Chat',
     component: () => import('./views/Chat.vue')
+  },
+  {
+    path: '/history',
+    name: 'History',
+    component: () => import('./views/History.vue')
   },
   {
     path: '/login',

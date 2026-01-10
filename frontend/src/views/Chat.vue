@@ -1,193 +1,95 @@
 <template>
-  <div class="max-w-6xl mx-auto h-[calc(100vh-12rem)]">
-    <div class="grid lg:grid-cols-4 gap-6 h-full">
-      <!-- 左侧：文档信息 & 建议问题 -->
-      <div class="lg:col-span-1 space-y-6">
-        <!-- 文档状态 -->
-        <div class="glass-card p-5">
-          <h3 class="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
-            <span>📄</span>
-            <span>当前文档</span>
-          </h3>
-          
-          <div v-if="isDocumentLoaded" class="space-y-3">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-xl flex items-center justify-center text-xl
-                          bg-gradient-to-br from-green-500/20 to-primary-500/20 border border-green-500/30">
-                ✅
-              </div>
-              <div class="flex-1 min-w-0">
-                <p class="text-white text-sm font-medium truncate">{{ documentInfo?.title || documentInfo?.filename }}</p>
-                <p class="text-gray-500 text-xs">{{ documentInfo?.word_count?.toLocaleString() }} 字</p>
-              </div>
-            </div>
-          </div>
-          
-          <div v-else class="text-center py-4">
-            <div class="w-12 h-12 mx-auto rounded-xl flex items-center justify-center text-2xl mb-3
-                        bg-gradient-to-br from-yellow-500/20 to-orange-500/20 border border-yellow-500/30">
-              ⚠️
-            </div>
-            <p class="text-gray-400 text-sm mb-4">尚未加载文档</p>
-            <router-link to="/analyze" class="btn-primary text-sm px-4 py-2 inline-flex items-center gap-2">
-              <span>📤</span>
-              <span>上传论文</span>
-            </router-link>
-          </div>
-        </div>
-        
-        <!-- 建议问题 -->
-        <div v-if="isDocumentLoaded" class="glass-card p-5">
-          <h3 class="text-sm font-medium text-gray-400 mb-4 flex items-center gap-2">
-            <span>💡</span>
-            <span>建议问题</span>
-          </h3>
-          
-          <div class="space-y-2">
-            <button
-              v-for="(question, index) in suggestedQuestions"
-              :key="index"
-              @click="askQuestion(question)"
-              class="w-full text-left px-4 py-3 rounded-xl text-sm text-gray-300 
-                     bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10
-                     transition-all duration-300 line-clamp-2"
-            >
-              {{ question }}
-            </button>
-          </div>
-        </div>
-        
-        <!-- 操作按钮 -->
-        <div v-if="messages.length > 0" class="glass-card p-5">
-          <button
-            @click="clearChat"
-            class="btn-secondary w-full text-sm flex items-center justify-center gap-2"
-          >
-            <span>🗑️</span>
-            <span>清除对话</span>
-          </button>
+  <div class="h-[calc(100vh-80px)] flex flex-col">
+    <!-- 顶部工具栏 -->
+    <div class="h-14 glass-card border-b border-white/5 px-6 flex items-center justify-between z-20">
+      <div class="flex items-center gap-4">
+        <h1 class="text-xl font-bold gradient-text">💬 智能问答</h1>
+        <div v-if="store.documentInfo" class="text-gray-400 text-sm border-l border-white/10 pl-4">
+          {{ store.documentInfo.filename }}
         </div>
       </div>
+    </div>
+
+    <!-- 主体内容区 -->
+    <div class="flex-1 flex overflow-hidden relative">
       
-      <!-- 右侧：聊天区域 -->
-      <div class="lg:col-span-3 glass-card flex flex-col overflow-hidden">
-        <!-- 聊天头部 -->
-        <div class="px-6 py-4 border-b border-white/5 flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl flex items-center justify-center text-xl
-                      bg-gradient-to-br from-primary-500/20 to-accent-500/20 border border-white/10">
-            🤖
-          </div>
-          <div>
-            <h2 class="text-white font-medium">论文问答助手</h2>
-            <p class="text-gray-500 text-xs">基于 RAG 技术的智能问答</p>
+      <!-- 未加载文档时的提示 -->
+      <div v-if="!store.pdfUrl" class="absolute inset-0 z-50 flex items-center justify-center bg-gray-900/90 backdrop-blur-sm">
+        <div class="text-center">
+          <div class="text-6xl mb-4">📄</div>
+          <h3 class="text-xl font-bold text-white mb-2">未加载文档</h3>
+          <p class="text-gray-400 mb-6">请先在分析页面上传文档，或在历史记录中打开文档。</p>
+          <div class="flex gap-4 justify-center">
+            <router-link to="/analyze" class="btn-primary px-6 py-2">去上传</router-link>
+            <router-link to="/history" class="btn-secondary px-6 py-2">查历史</router-link>
           </div>
         </div>
-        
-        <!-- 聊天消息列表 -->
-        <div 
-          ref="messagesRef"
-          class="flex-1 overflow-y-auto p-6 space-y-6"
-        >
-          <!-- 欢迎消息 -->
-          <div v-if="messages.length === 0" class="text-center py-12">
-            <div class="w-20 h-20 mx-auto rounded-2xl flex items-center justify-center text-4xl mb-6
-                        bg-gradient-to-br from-primary-500/20 to-accent-500/20 border border-white/10">
-              💬
-            </div>
-            <h3 class="text-xl font-semibold text-white mb-3">开始对话</h3>
-            <p class="text-gray-400 max-w-md mx-auto">
-              {{ isDocumentLoaded 
-                ? '向我询问任何关于论文的问题，我会基于论文内容为您解答' 
-                : '请先上传并分析论文，然后开始对话' 
-              }}
-            </p>
+      </div>
+
+      <!-- 左侧：PDF 阅读器 -->
+      <div class="w-1/2 bg-gray-900/50 relative flex flex-col border-r border-white/5">
+        <div v-if="store.pdfUrl" class="flex-1 overflow-y-auto custom-scrollbar p-8 flex justify-center">
+          <div class="w-full max-w-4xl shadow-2xl">
+            <vue-pdf-embed :source="store.pdfUrl" class="rounded-lg overflow-hidden" />
           </div>
-          
-          <!-- 消息列表 -->
-          <div
-            v-for="(message, index) in messages"
-            :key="index"
-            class="animate-slide-up"
-            :style="{ animationDelay: `${index * 0.05}s` }"
-          >
-            <!-- 用户消息 -->
-            <div v-if="message.role === 'user'" class="flex justify-end">
-              <div class="chat-bubble user">
-                {{ message.content }}
-              </div>
-            </div>
+        </div>
+      </div>
+
+      <!-- 右侧：问答面板 -->
+      <div class="w-1/2 glass-card border-l border-white/5 flex flex-col bg-gray-900/80 backdrop-blur-xl">
+        <div class="flex-1 overflow-y-auto space-y-4 mb-4 pr-2 p-6" ref="chatContainer">
+          <div v-if="messages.length === 0" class="text-center py-8 text-gray-500 text-sm">
+            <p class="mb-4">👋 你好！我是你的论文助手。</p>
+            <p v-if="suggestedQuestions.length === 0">你可以问我任何关于这篇论文的问题。</p>
             
-            <!-- AI 消息 -->
-            <div v-else class="flex gap-3">
-              <div class="w-8 h-8 rounded-lg flex items-center justify-center text-lg flex-shrink-0
-                          bg-gradient-to-br from-primary-500/20 to-accent-500/20 border border-white/10">
-                🤖
-              </div>
-              <div class="flex-1 min-w-0">
-                <div class="chat-bubble assistant">
-                  <div 
-                    class="markdown-content" 
-                    v-html="renderMarkdown(message.content)"
-                  ></div>
-                  <span v-if="message.isTyping" class="typing-cursor"></span>
-                </div>
-                
-                <!-- 来源引用 -->
-                <div v-if="message.sources?.length" class="mt-3 space-y-2">
-                  <div class="text-xs text-gray-500 flex items-center gap-1">
-                    <span>📚</span>
-                    <span>参考来源</span>
-                  </div>
-                  <div class="space-y-2">
-                    <div
-                      v-for="(source, i) in message.sources.slice(0, 3)"
-                      :key="i"
-                      class="text-xs text-gray-400 bg-white/5 rounded-lg px-3 py-2 border border-white/5"
-                    >
-                      {{ source.slice(0, 150) }}{{ source.length > 150 ? '...' : '' }}
-                    </div>
-                  </div>
-                </div>
-              </div>
+            <!-- 建议问题 -->
+            <div v-if="suggestedQuestions.length > 0" class="grid grid-cols-1 gap-2 max-w-md mx-auto mt-6">
+              <button 
+                v-for="(q, i) in suggestedQuestions" 
+                :key="i"
+                @click="useQuestion(q)"
+                class="text-left px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-primary-500/30 transition-all text-gray-300 text-sm flex items-center gap-2 group"
+              >
+                <span class="text-primary-500 group-hover:scale-110 transition-transform">💡</span>
+                {{ q }}
+              </button>
             </div>
           </div>
           
-          <!-- 加载状态 -->
-          <div v-if="isLoading" class="flex gap-3">
-            <div class="w-8 h-8 rounded-lg flex items-center justify-center text-lg flex-shrink-0
-                        bg-gradient-to-br from-primary-500/20 to-accent-500/20 border border-white/10">
-              🤖
+          <div v-for="(msg, index) in messages" :key="index" 
+               class="flex gap-3" :class="msg.role === 'user' ? 'flex-row-reverse' : ''">
+            <div class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-sm"
+                 :class="msg.role === 'user' ? 'bg-primary-500 text-white' : 'bg-gray-700 text-gray-300'">
+              {{ msg.role === 'user' ? '我' : 'AI' }}
             </div>
-            <div class="chat-bubble assistant">
-              <div class="loading-dots text-primary-400">
-                <span></span>
-                <span></span>
-                <span></span>
+            <div class="max-w-[85%] p-3 rounded-2xl text-sm"
+                 :class="msg.role === 'user' ? 'bg-primary-500/20 text-white rounded-tr-sm' : 'bg-white/5 text-gray-300 rounded-tl-sm'">
+              <div v-if="msg.content" v-html="renderMarkdown(msg.content)"></div>
+              <div v-else class="flex gap-1 h-5 items-center">
+                <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></span>
+                <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-100"></span>
+                <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-200"></span>
               </div>
             </div>
           </div>
         </div>
         
-        <!-- 输入区域 -->
-        <div class="p-4 border-t border-white/5">
-          <form @submit.prevent="sendMessage" class="flex gap-3">
-            <input
-              v-model="inputMessage"
-              type="text"
-              :placeholder="isDocumentLoaded ? '输入您的问题...' : '请先上传论文文档'"
-              :disabled="!isDocumentLoaded || isLoading"
-              class="input-glass flex-1"
-              @keydown.enter.prevent="sendMessage"
-            />
-            <button
-              type="submit"
-              :disabled="!inputMessage.trim() || !isDocumentLoaded || isLoading"
-              class="btn-primary px-6 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <span class="hidden sm:inline">发送</span>
-              <span class="sm:hidden">➤</span>
-            </button>
-          </form>
+        <div class="relative p-6 pt-0">
+          <input 
+            v-model="inputMessage" 
+            @keyup.enter="sendMessage"
+            type="text" 
+            placeholder="输入问题..." 
+            class="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-primary-500/50 transition-colors"
+            :disabled="isChatting || !store.documentInfo"
+          >
+          <button 
+            @click="sendMessage"
+            :disabled="isChatting || !inputMessage.trim()"
+            class="absolute right-8 top-1/2 -translate-y-1/2 -mt-3 p-1.5 rounded-lg text-primary-400 hover:text-white hover:bg-primary-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -195,159 +97,87 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted, watch } from 'vue'
+import { ref, nextTick, onMounted } from 'vue'
 import { marked } from 'marked'
+import VuePdfEmbed from 'vue-pdf-embed'
 import api from '../api'
+import { store } from '../store'
 
-// 状态
-const messagesRef = ref(null)
 const inputMessage = ref('')
+const isChatting = ref(false)
 const messages = ref([])
-const isLoading = ref(false)
-const isDocumentLoaded = ref(false)
-const documentInfo = ref(null)
-const suggestedQuestions = ref([
-  '这篇论文的主要研究问题是什么？',
-  '论文使用了什么方法？',
-  '实验结果如何？',
-  '论文的创新点是什么？',
-  '有什么局限性？',
-  '作者提出了哪些未来工作？'
-])
+const chatContainer = ref(null)
+const suggestedQuestions = ref([])
 
-// 方法
-const renderMarkdown = (content) => {
-  if (!content) return ''
-  return marked(content)
-}
+const renderMarkdown = (text) => marked(text || '')
 
-const scrollToBottom = () => {
-  nextTick(() => {
-    if (messagesRef.value) {
-      messagesRef.value.scrollTop = messagesRef.value.scrollHeight
-    }
-  })
-}
-
-const askQuestion = (question) => {
-  inputMessage.value = question
+const useQuestion = (q) => {
+  inputMessage.value = q
   sendMessage()
 }
 
 const sendMessage = async () => {
-  const question = inputMessage.value.trim()
-  if (!question || !isDocumentLoaded.value || isLoading.value) return
+  if (!inputMessage.value.trim() || isChatting.value) return
   
-  // 添加用户消息
-  messages.value.push({
-    role: 'user',
-    content: question
-  })
-  
+  const content = inputMessage.value
   inputMessage.value = ''
-  isLoading.value = true
-  scrollToBottom()
+  isChatting.value = true
+  
+  messages.value.push({ role: 'user', content })
+  messages.value.push({ role: 'assistant', content: '' }) 
+  
+  nextTick(() => scrollToBottom())
   
   try {
-    // 使用流式响应
-    const assistantMessage = {
-      role: 'assistant',
-      content: '',
-      isTyping: true,
-      sources: []
-    }
-    messages.value.push(assistantMessage)
-    scrollToBottom()
-    
-    // 尝试流式获取
-    try {
-      for await (const chunk of api.chatStream(question)) {
-        assistantMessage.content += chunk
-        scrollToBottom()
-      }
-    } catch (streamError) {
-      // 如果流式失败，回退到普通请求
-      const result = await api.chat(question)
-      assistantMessage.content = result.answer
-      assistantMessage.sources = result.source_chunks || []
-    }
-    
-    assistantMessage.isTyping = false
-  } catch (err) {
-    messages.value.push({
-      role: 'assistant',
-      content: `❌ 抱歉，发生错误：${err.message}`,
-      isTyping: false
-    })
-  } finally {
-    isLoading.value = false
-    scrollToBottom()
-  }
-}
-
-const clearChat = async () => {
-  messages.value = []
-  try {
-    await api.clearChat()
-  } catch (e) {
-    // 忽略错误
-  }
-}
-
-// 监听消息变化，自动滚动
-watch(messages, scrollToBottom, { deep: true })
-
-// 加载历史对话记录
-const loadChatHistory = () => {
-  try {
-    const savedHistory = sessionStorage.getItem('chatHistory')
-    if (savedHistory) {
-      const chatHistory = JSON.parse(savedHistory)
-      // 转换格式
-      messages.value = chatHistory.map(msg => ({
-        role: msg.role,
-        content: msg.content,
-        sources: msg.source_chunks || [],
-        isTyping: false
-      }))
-      // 清除 sessionStorage
-      sessionStorage.removeItem('chatHistory')
+    let responseText = ''
+    for await (const chunk of api.chatStream(content)) {
+      responseText += chunk
+      messages.value[messages.value.length - 1].content = responseText
       scrollToBottom()
     }
   } catch (e) {
-    // 忽略错误
+    messages.value[messages.value.length - 1].content = '回答出错: ' + e.message
+  } finally {
+    isChatting.value = false
   }
 }
 
-// 初始化
-onMounted(async () => {
-  try {
-    const doc = await api.getDocument()
-    isDocumentLoaded.value = doc.is_loaded
-    documentInfo.value = doc.info
-    
-    // 加载历史对话记录
-    loadChatHistory()
-    
-    // 获取建议问题
-    if (doc.is_loaded) {
-      const suggestions = await api.getSuggestions()
-      if (suggestions.questions?.length) {
-        suggestedQuestions.value = suggestions.questions
-      }
-    }
-  } catch (e) {
-    // 忽略错误
+const scrollToBottom = () => {
+  if (chatContainer.value) {
+    chatContainer.value.scrollTop = chatContainer.value.scrollHeight
   }
+}
+
+// 加载历史对话和建议问题
+onMounted(async () => {
+    if (store.documentInfo?.document_id) {
+        try {
+            // 加载建议问题
+            const suggestionsRes = await api.getSuggestions()
+            if (suggestionsRes.questions) {
+                suggestedQuestions.value = suggestionsRes.questions
+            }
+
+            // 加载历史对话
+            const res = await api.getHistoryChat(store.documentInfo.document_id)
+            if (res.chat_history) {
+                // 转换格式
+                messages.value = res.chat_history.map(item => ({
+                    role: item.role,
+                    content: item.content
+                }))
+                nextTick(() => scrollToBottom())
+            }
+        } catch(e) {
+            console.error("加载数据失败", e)
+        }
+    }
 })
 </script>
 
 <style scoped>
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
+.custom-scrollbar::-webkit-scrollbar { width: 6px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 3px; }
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
 </style>
-

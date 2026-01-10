@@ -132,7 +132,9 @@ const route = useRoute()
 const navLinks = [
   { to: '/', icon: '🏠', label: '首页' },
   { to: '/analyze', icon: '📊', label: '分析' },
+  { to: '/translate', icon: '🌐', label: '翻译' },
   { to: '/chat', icon: '💬', label: '问答' },
+  { to: '/history', icon: '📚', label: '历史' },
   { to: null, icon: '💻', label: '代码' }  // 功能开发中
 ]
 
