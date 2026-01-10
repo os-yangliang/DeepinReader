@@ -3,11 +3,14 @@
 """
 import os
 import json
+import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from config import CHROMA_PERSIST_DIR
 from services.chroma_client import get_chroma_client
+
+logger = logging.getLogger(__name__)
 
 
 class HistoryStoreService:
@@ -68,8 +71,7 @@ class HistoryStoreService:
         Returns:
             str: 历史记录ID
         """
-        print(f"[HistoryStore] add_analysis_history 被调用")
-        print(f"[HistoryStore] document_id={document_id}, filename={filename}")
+        logger.debug("add_analysis_history called: document_id=%s, filename=%s", document_id, filename)
         
         history_id = f"h_{document_id}"
         analyzed_at = datetime.now().isoformat()
@@ -93,7 +95,6 @@ class HistoryStoreService:
         
         # 检查是否已存在
         existing = self.history_collection.get(ids=[history_id])
-        print(f"[HistoryStore] 检查是否已存在: {existing['ids'] if existing else 'None'}")
         
         if existing and existing['ids']:
             # 更新现有记录
@@ -102,7 +103,7 @@ class HistoryStoreService:
                 documents=[content],
                 metadatas=[metadata]
             )
-            print(f"[HistoryStore] 更新现有记录: {history_id}")
+            logger.debug("Updated existing history record: %s", history_id)
         else:
             # 添加新记录
             self.history_collection.add(
@@ -110,11 +111,7 @@ class HistoryStoreService:
                 documents=[content],
                 metadatas=[metadata]
             )
-            print(f"[HistoryStore] 添加新记录: {history_id}")
-        
-        # 验证保存结果
-        count = self.history_collection.count()
-        print(f"[HistoryStore] 当前历史记录总数: {count}")
+            logger.debug("Added new history record: %s", history_id)
         
         return history_id
     
@@ -159,7 +156,7 @@ class HistoryStoreService:
             return history_list[:limit]
             
         except Exception as e:
-            print(f"[ERROR] 获取历史记录失败: {e}")
+            logger.exception("获取历史记录失败: %s", e)
             return []
     
     def get_analysis_history_detail(self, history_id: str) -> Optional[Dict[str, Any]]:
@@ -198,7 +195,7 @@ class HistoryStoreService:
             }
             
         except Exception as e:
-            print(f"[ERROR] 获取历史记录详情失败: {e}")
+            logger.exception("获取历史记录详情失败: %s", e)
             return None
     
     def delete_analysis_history(self, history_id: str) -> bool:
@@ -217,7 +214,7 @@ class HistoryStoreService:
             self._delete_chat_history_by_document(history_id)
             return True
         except Exception as e:
-            print(f"[ERROR] 删除历史记录失败: {e}")
+            logger.exception("删除历史记录失败: %s", e)
             return False
     
     # ==================== 对话记录 ====================
@@ -305,7 +302,7 @@ class HistoryStoreService:
             return chat_list[-limit:]
             
         except Exception as e:
-            print(f"[ERROR] 获取对话历史失败: {e}")
+            logger.exception("获取对话历史失败: %s", e)
             return []
     
     def clear_chat_history(self, document_id: str) -> bool:
@@ -336,6 +333,6 @@ class HistoryStoreService:
             
             return True
         except Exception as e:
-            print(f"[ERROR] 删除对话历史失败: {e}")
+            logger.exception("删除对话历史失败: %s", e)
             return False
 

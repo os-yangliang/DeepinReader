@@ -271,9 +271,21 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
+import { useRouter } from 'vue-router'
 import { marked } from 'marked'
 import api from '../api'
+
+const router = useRouter()
+
+// 从 App.vue 注入登录状态
+const isLoggedIn = inject('isLoggedIn', ref(false))
+
+// 检查是否已登录
+const checkLogin = () => {
+  const token = localStorage.getItem('access_token')
+  return !!token
+}
 
 // 状态
 const fileInputRef = ref(null)
@@ -311,6 +323,11 @@ const renderedSummary = computed(() => {
 
 // 方法
 const triggerFileInput = () => {
+  // 未登录时跳转到登录页
+  if (!checkLogin()) {
+    router.push('/login')
+    return
+  }
   fileInputRef.value?.click()
 }
 
@@ -324,6 +341,13 @@ const handleFileSelect = (e) => {
 
 const handleDrop = (e) => {
   isDragging.value = false
+  
+  // 未登录时跳转到登录页
+  if (!checkLogin()) {
+    router.push('/login')
+    return
+  }
+  
   const droppedFile = e.dataTransfer.files?.[0]
   if (droppedFile) {
     // 检查文件类型
@@ -409,12 +433,9 @@ const resetUpload = async () => {
 // 历史记录相关方法
 const fetchHistory = async () => {
   try {
-    console.log('[Analyze] 正在获取历史记录...')
     const res = await api.getHistory()
-    console.log('[Analyze] 获取到历史记录:', res)
     historyList.value = res.history || []
     currentHistoryId.value = res.current_id
-    console.log('[Analyze] historyList 更新为:', historyList.value)
   } catch (e) {
     console.error('[Analyze] 获取历史记录失败:', e)
   }

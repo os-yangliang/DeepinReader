@@ -22,6 +22,14 @@ python-docx>=1.0.0
 # Embedding 模型
 sentence-transformers>=2.2.0
 
+# 数据库
+sqlalchemy>=2.0.0
+# mysql-connector-python>=8.0.0  # 如果使用 MySQL，取消注释此行
+
+# 认证
+passlib[bcrypt]>=1.7.0
+python-jose[cryptography]>=3.3.0
+
 # 其他工具
 python-dotenv>=1.0.0
 tiktoken>=0.5.0

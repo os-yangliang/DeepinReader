@@ -77,19 +77,11 @@ DEEPSEEK_API_KEY=your-deepseek-api-key-here
 
 **启动后端 API：**
 ```bash
-# Windows
-run_api.bat
-
-# 或手动启动
-python -m uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn api:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 **启动前端开发服务器：**
 ```bash
-# Windows
-run_frontend.bat
-
-# 或手动启动
 cd frontend
 npm run dev
 ```
@@ -105,8 +97,8 @@ python app.py
 | 服务 | 地址 |
 |------|------|
 | 前端界面 | http://localhost:3000 |
-| API 服务 | http://localhost:8000 |
-| API 文档 | http://localhost:8000/docs |
+| API 服务 | http://localhost:8001 |
+| API 文档 | http://localhost:8001/docs |
 | Gradio 界面 | http://localhost:7860 |
 
 ## 📖 使用说明
@@ -153,9 +145,7 @@ paper_reader/
 ├── app.py                    # Gradio 主应用入口（备用）
 ├── config.py                 # 配置文件
 ├── requirements.txt          # Python 依赖包
-├── start.bat                 # 一键启动脚本
-├── run_api.bat              # API 服务器启动脚本
-├── run_frontend.bat         # 前端启动脚本
+├── start.bat                 # 一键启动脚本（Windows）
 │
 ├── frontend/                 # Vue 3 前端
 │   ├── package.json

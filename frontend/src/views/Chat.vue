@@ -195,7 +195,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, watch } from 'vue'
+import { ref, nextTick, onMounted, watch } from 'vue'
 import { marked } from 'marked'
 import api from '../api'
 
@@ -273,16 +273,6 @@ const sendMessage = async () => {
     }
     
     assistantMessage.isTyping = false
-    
-    // 获取来源（如果流式没有提供）
-    if (!assistantMessage.sources.length) {
-      try {
-        const result = await api.chat(question)
-        assistantMessage.sources = result.source_chunks || []
-      } catch (e) {
-        // 忽略
-      }
-    }
   } catch (err) {
     messages.value.push({
       role: 'assistant',

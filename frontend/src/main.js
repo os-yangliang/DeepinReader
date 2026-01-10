@@ -19,6 +19,16 @@ const routes = [
     path: '/chat',
     name: 'Chat',
     component: () => import('./views/Chat.vue')
+  },
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('./views/Login.vue')
+  },
+  {
+    path: '/profile',
+    name: 'Profile',
+    component: () => import('./views/Profile.vue')
   }
 ]
 
@@ -30,4 +40,3 @@ const router = createRouter({
 const app = createApp(App)
 app.use(router)
 app.mount('#app')
-

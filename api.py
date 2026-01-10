@@ -1,7 +1,8 @@
 """
 论文阅读多智能体系统 - FastAPI 后端 API
 """
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -10,14 +11,19 @@ import os
 import sys
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
+import logging
 
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from agents.coordinator import PaperReaderCoordinator
 from services.history_store import HistoryStoreService
-from config import SUPPORTED_EXTENSIONS, MAX_FILE_SIZE_MB, CORS_ALLOW_ORIGINS
+from config import SUPPORTED_EXTENSIONS, MAX_FILE_SIZE_MB, CORS_ALLOW_ORIGINS, ACCESS_TOKEN_EXPIRE_MINUTES
+from services.database import get_db, User
+from services.auth_service import AuthService
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="论文阅读助手 API",
@@ -33,6 +39,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 初始化认证服务
+auth_service = AuthService()
+
+# OAuth2 Scheme
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
 
 # 全局状态
 class AppState:
@@ -67,16 +79,11 @@ class AppState:
     
     def save_to_history(self, doc_info: dict, structure: str, summary: str) -> Optional[str]:
         """保存分析记录到历史（持久化到 ChromaDB）"""
-        print(f"[DEBUG] save_to_history 被调用, history_store={self.history_store is not None}")
-        print(f"[DEBUG] doc_info={doc_info}")
-        
         if not self.history_store:
-            print("[WARNING] history_store 未初始化，无法保存历史记录")
             return None
         
         try:
             document_id = doc_info.get("document_id", "")
-            print(f"[DEBUG] 准备保存历史记录, document_id={document_id}")
             
             history_id = self.history_store.add_analysis_history(
                 document_id=document_id,
@@ -91,12 +98,10 @@ class AppState:
             )
             self.current_history_id = history_id
             self.current_document_id = document_id
-            print(f"[DEBUG] 历史记录保存成功, history_id={history_id}")
             return history_id
         except Exception as e:
             import traceback
-            print(f"[ERROR] 保存历史记录失败: {e}")
-            print(f"[ERROR] 详细错误: {traceback.format_exc()}")
+            logger.exception("保存历史记录失败: %s\n%s", e, traceback.format_exc())
             return None
     
     def save_chat_message(self, role: str, content: str, source_chunks: List[str] = None):
@@ -112,7 +117,7 @@ class AppState:
                 source_chunks=source_chunks
             )
         except Exception as e:
-            print(f"[ERROR] 保存对话消息失败: {e}")
+            logger.exception("保存对话消息失败: %s", e)
 
 state = AppState()
 
@@ -161,11 +166,43 @@ class ChatHistoryItem(BaseModel):
     timestamp: str = ""
     source_chunks: List[str] = []
 
+# 用户相关模型
+class RegisterRequest(BaseModel):
+    phone: str
+    password: str
+    nickname: str
+    avatar: Optional[str] = None
+    age: Optional[int] = None
+    profession: Optional[str] = None
+
+class LoginRequest(BaseModel):
+    phone: str
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+
+class UserProfileUpdateRequest(BaseModel):
+    nickname: Optional[str] = None
+    avatar: Optional[str] = None
+    age: Optional[int] = None
+    profession: Optional[str] = None
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    """获取当前用户"""
+    payload = auth_service.decode_access_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=401,
+            detail="无效的认证凭据",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return payload
 
 @app.get("/")
 async def root():
     return {"message": "论文阅读助手 API", "version": "2.0.0"}
-
 
 @app.get("/api/status")
 async def get_status():
@@ -174,7 +211,6 @@ async def get_status():
         "is_document_loaded": state.is_document_loaded,
         "has_coordinator": state.coordinator is not None
     }
-
 
 @app.get("/api/document", response_model=DocumentInfoResponse)
 async def get_document_info():
@@ -185,7 +221,6 @@ async def get_document_info():
         structure=state.current_structure,
         summary=state.current_summary
     )
-
 
 @app.post("/api/upload", response_model=AnalysisResponse)
 async def upload_and_analyze(file: UploadFile = File(...)):
@@ -261,13 +296,12 @@ async def upload_and_analyze(file: UploadFile = File(...)):
     except Exception as e:
         import traceback
         error_detail = f"{str(e)}\n{traceback.format_exc()}"
-        print(f"[ERROR] 文档分析失败: {error_detail}")
+        logger.error("文档分析失败: %s", error_detail)
         return AnalysisResponse(
             success=False,
             status="处理失败",
             error=str(e)
         )
-
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
@@ -302,7 +336,6 @@ async def chat(request: ChatRequest):
             answer=f"回答失败: {result.error_message}",
             source_chunks=[]
         )
-
 
 @app.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest):
@@ -343,7 +376,6 @@ async def chat_stream(request: ChatRequest):
         }
     )
 
-
 @app.get("/api/suggestions")
 async def get_suggestions():
     """获取建议问题"""
@@ -355,7 +387,6 @@ async def get_suggestions():
     
     return {"questions": questions}
 
-
 @app.post("/api/clear")
 async def clear_chat():
     """清除聊天历史"""
@@ -365,7 +396,6 @@ async def clear_chat():
     if state.history_store and state.current_document_id:
         state.history_store.clear_chat_history(state.current_document_id)
     return {"success": True}
-
 
 @app.delete("/api/document")
 async def clear_document():
@@ -379,7 +409,6 @@ async def clear_document():
     if state.coordinator:
         state.coordinator.clear_chat_history()
     return {"success": True}
-
 
 @app.get("/api/history", response_model=HistoryListResponse)
 async def get_analysis_history():
@@ -407,9 +436,8 @@ async def get_analysis_history():
             current_id=state.current_history_id
         )
     except Exception as e:
-        print(f"[ERROR] 获取历史记录失败: {e}")
+        logger.error("获取历史记录失败: %s", e)
         return HistoryListResponse(history=[], current_id=None)
-
 
 @app.get("/api/history/{history_id}")
 async def get_history_detail(history_id: str):
@@ -421,7 +449,6 @@ async def get_history_detail(history_id: str):
     if not item:
         raise HTTPException(status_code=404, detail="历史记录不存在")
     return item
-
 
 @app.post("/api/history/{history_id}/load")
 async def load_history_item(history_id: str):
@@ -462,7 +489,7 @@ async def load_history_item(history_id: str):
                     paper_summary=state.current_summary[:500]
                 )
         except Exception as e:
-            print(f"[WARNING] 加载向量集合失败: {e}")
+            logger.warning("加载向量集合失败: %s", e)
     
     # 获取该文档的对话历史
     chat_history = []
@@ -476,7 +503,6 @@ async def load_history_item(history_id: str):
         "summary": state.current_summary,
         "chat_history": chat_history
     }
-
 
 @app.delete("/api/history/{history_id}")
 async def delete_history_item(history_id: str):
@@ -500,7 +526,7 @@ async def delete_history_item(history_id: str):
         try:
             state.coordinator.vector_store.delete_collection(item["document_id"])
         except Exception as e:
-            print(f"[WARNING] 删除向量集合失败: {e}")
+            logger.warning("删除向量集合失败: %s", e)
     
     # 如果删除的是当前记录，清除当前状态
     if state.current_history_id == history_id:
@@ -512,7 +538,6 @@ async def delete_history_item(history_id: str):
         state.document_info = {}
     
     return {"success": True}
-
 
 @app.get("/api/history/{history_id}/chat")
 async def get_history_chat(history_id: str):
@@ -530,7 +555,99 @@ async def get_history_chat(history_id: str):
     
     return {"chat_history": chat_history}
 
+# 用户认证相关接口
+@app.post("/api/register", response_model=TokenResponse)
+async def register(request: RegisterRequest, db=Depends(get_db)):
+    """用户注册"""
+    # 检查用户是否已存在
+    existing_user = db.query(User).filter(User.phone == request.phone).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="手机号已被注册")
+    
+    # 创建新用户
+    user = auth_service.register_user(
+        db=db,
+        phone=request.phone,
+        password=request.password,
+        nickname=request.nickname,
+        avatar=request.avatar,
+        age=request.age,
+        profession=request.profession
+    )
+    
+    if not user:
+        raise HTTPException(status_code=400, detail="注册失败")
+    
+    # 生成访问令牌
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth_service.create_access_token(
+        data={"sub": str(user.id), "phone": user.phone},
+        expires_delta=access_token_expires
+    )
+    
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/api/login", response_model=TokenResponse)
+async def login(request: LoginRequest, db=Depends(get_db)):
+    """用户登录"""
+    user = auth_service.authenticate_user(db, request.phone, request.password)
+    if not user:
+        raise HTTPException(status_code=400, detail="手机号或密码错误")
+    
+    # 生成访问令牌
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth_service.create_access_token(
+        data={"sub": str(user.id), "phone": user.phone},
+        expires_delta=access_token_expires
+    )
+    
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/api/user/profile")
+async def get_user_profile(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
+    """获取用户资料"""
+    user_id = current_user.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    return {
+        "id": user.id,
+        "phone": user.phone,
+        "nickname": user.nickname,
+        "avatar": user.avatar,
+        "age": user.age,
+        "profession": user.profession,
+        "is_verified": user.is_verified == 1
+    }
+
+@app.put("/api/user/profile")
+async def update_user_profile(
+    request: UserProfileUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_db)
+):
+    """更新用户资料"""
+    user_id = current_user.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    # 更新用户信息
+    if request.nickname is not None:
+        user.nickname = request.nickname
+    if request.avatar is not None:
+        user.avatar = request.avatar
+    if request.age is not None:
+        user.age = request.age
+    if request.profession is not None:
+        user.profession = request.profession
+    
+    db.commit()
+    db.refresh(user)
+    
+    return {"success": True, "message": "资料更新成功"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
