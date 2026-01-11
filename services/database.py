@@ -31,6 +31,11 @@ class User(Base):
     verification_code = Column(String(10), nullable=True)  # 验证码
     verification_code_expires = Column(DateTime, nullable=True)  # 验证码过期时间
     is_verified = Column(Integer, default=0)  # 是否验证
+    
+    # 配额限制字段
+    last_usage_date = Column(String(20), nullable=True)  # 格式: YYYY-MM-DD
+    daily_usage_count = Column(Integer, default=0)   # 当日已使用次数
+    
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
