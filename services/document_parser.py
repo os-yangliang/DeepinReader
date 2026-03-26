@@ -8,6 +8,7 @@ import fitz  # PyMuPDF
 from docx import Document
 
 from config import SUPPORTED_EXTENSIONS, MAX_FILE_SIZE_MB, CHUNK_SIZE, CHUNK_OVERLAP
+from services.text_utils import split_text
 
 
 @dataclass
@@ -155,7 +156,7 @@ class DocumentParser:
     
     def _create_chunks(self, text: str) -> List[str]:
         """
-        将文本分割成固定大小的块
+        将文本分割成固定大小的块（委托给共享的 split_text 工具函数）
         
         Args:
             text: 原始文本
@@ -163,44 +164,41 @@ class DocumentParser:
         Returns:
             List[str]: 文本块列表
         """
-        if not text:
-            return []
-        
-        chunks = []
-        start = 0
-        text_length = len(text)
-        
-        while start < text_length:
-            # 计算结束位置
-            end = start + self.chunk_size
-            
-            if end >= text_length:
-                # 最后一块
-                chunks.append(text[start:].strip())
-                break
-            
-            # 尝试在句子边界处分割
-            # 向后查找句号、问号、感叹号等
-            search_start = max(start + self.chunk_size - 100, start)
-            best_split = end
-            
-            for sep in ["。", ".", "！", "!", "？", "?", "\n\n", "\n"]:
-                pos = text.rfind(sep, search_start, end + 50)
-                if pos != -1 and pos > search_start:
-                    best_split = pos + len(sep)
-                    break
-            
-            chunk = text[start:best_split].strip()
-            if chunk:
-                chunks.append(chunk)
-            
-            # 计算下一块的起始位置（带重叠）
-            start = best_split - self.chunk_overlap
-            if start < 0:
-                start = 0
-        
-        return chunks
+        return split_text(
+            text,
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap
+        )
     
+    def _parse_pdf_from_bytes(self, file_bytes: bytes, filename: str) -> ParsedDocument:
+        """直接从字节流解析 PDF（避免临时文件 I/O）"""
+        try:
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+
+            full_text = ""
+            for page_num, page in enumerate(doc):
+                text = page.get_text()
+                full_text += f"\n--- 第 {page_num + 1} 页 ---\n{text}"
+
+            metadata = doc.metadata or {}
+            title = metadata.get("title", "") or self._extract_title_from_text(full_text)
+            chunks = self._create_chunks(full_text)
+
+            parsed_doc = ParsedDocument(
+                filename=filename,
+                file_type="pdf",
+                title=title,
+                content=full_text,
+                chunks=chunks,
+                metadata=metadata,
+                page_count=len(doc),
+                word_count=len(full_text.split())
+            )
+            doc.close()
+            return parsed_doc
+        except Exception as e:
+            raise RuntimeError(f"解析 PDF 字节流失败: {str(e)}")
+
     def parse_from_bytes(self, file_bytes: bytes, filename: str) -> ParsedDocument:
         """
         从字节流解析文档（用于文件上传）
@@ -212,20 +210,23 @@ class DocumentParser:
         Returns:
             ParsedDocument: 解析后的文档对象
         """
-        import tempfile
-        
         _, ext = os.path.splitext(filename)
         ext = ext.lower()
         
         if ext not in SUPPORTED_EXTENSIONS:
             raise ValueError(f"不支持的文件格式: {ext}")
 
-        # 先做一次大小校验，避免落盘/解析超大文件
+        # 大小校验
         file_size_mb = len(file_bytes) / (1024 * 1024)
         if file_size_mb > MAX_FILE_SIZE_MB:
             raise ValueError(f"文件过大: {file_size_mb:.2f}MB，最大支持 {MAX_FILE_SIZE_MB}MB")
-        
-        # 创建临时文件
+
+        # PDF: 直接从内存解析，避免临时文件
+        if ext == ".pdf":
+            return self._parse_pdf_from_bytes(file_bytes, filename)
+
+        # Word: 仍需临时文件（python-docx 需要文件路径）
+        import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp_file:
             tmp_file.write(file_bytes)
             tmp_path = tmp_file.name
@@ -234,6 +235,5 @@ class DocumentParser:
             result = self.parse(tmp_path)
             return result
         finally:
-            # 清理临时文件
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)

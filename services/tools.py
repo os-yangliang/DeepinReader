@@ -3,7 +3,14 @@
 """
 import logging
 from typing import List, Dict
-from duckduckgo_search import DDGS
+
+try:
+    from ddgs import DDGS
+except ImportError:
+    try:
+        from duckduckgo_search import DDGS
+    except ImportError:
+        DDGS = None
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +18,7 @@ class ToolService:
     """工具服务管理器"""
     
     def __init__(self):
-        self.ddgs = DDGS()
+        self.ddgs = DDGS() if DDGS else None
 
     def web_search(self, query: str, max_results: int = 3) -> str:
         """
@@ -25,6 +32,8 @@ class ToolService:
             str: 格式化后的搜索结果文本
         """
         try:
+            if not self.ddgs:
+                return "网络搜索不可用（未安装 ddgs 包）。"
             logger.info(f"正在执行网络搜索: {query}")
             results = self.ddgs.text(query, max_results=max_results)
             

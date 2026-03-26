@@ -9,7 +9,7 @@ load_dotenv()
 
 # LLM 配置
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-LLM_MAX_TOKENS = os.getenv("LLM_MAX_TOKENS", "20000")
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "20000"))
 DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
@@ -41,19 +41,3 @@ else:
         "http://127.0.0.1:3001",
     ]
 
-# 数据库配置
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
-    "sqlite:///./paper_reader.db"
-)
-
-# JWT 配置
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
-
-# 生产环境安全检查
-if os.getenv("ENVIRONMENT", "development") == "production":
-    if SECRET_KEY == "dev-secret-key-change-me":
-        raise ValueError("CRITICAL: 生产环境必须设置强 SECRET_KEY，不能使用默认值！")
-
-ALGORITHM = os.getenv("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))

@@ -1,9 +1,12 @@
 /** @type {import('tailwindcss').Config} */
+const plugin = require('tailwindcss/plugin')
+
 export default {
   content: [
     "./index.html",
     "./src/**/*.{vue,js,ts,jsx,tsx}",
   ],
+  darkMode: ['selector', '[data-theme="dark"]'],
   theme: {
     extend: {
       colors: {
@@ -102,6 +105,25 @@ export default {
       }
     },
   },
-  plugins: [],
+  plugins: [
+    plugin(function({ addBase }) {
+      addBase({
+        // 解决 text-white 在亮色主题下的问题
+        '[data-theme="light"] .text-white': { color: '#0f172a' },
+        '[data-theme="light"] .text-gray-400': { color: '#475569' },
+        '[data-theme="light"] .text-gray-500': { color: '#64748b' },
+        '[data-theme="light"] .text-gray-300': { color: '#334155' },
+        '[data-theme="light"] .text-gray-600': { color: '#94a3b8' },
+        // 背景覆盖
+        '[data-theme="light"] .bg-gray-900\\/50': { backgroundColor: 'rgba(248, 250, 252, 0.8)' },
+        '[data-theme="light"] .bg-gray-900\\/80': { backgroundColor: 'rgba(241, 245, 249, 0.9)' },
+        '[data-theme="light"] .bg-gray-900\\/90': { backgroundColor: 'rgba(241, 245, 249, 0.95)' },
+        // 边框
+        '[data-theme="light"] .border-white\\/5': { borderColor: 'rgba(0, 0, 0, 0.06)' },
+        '[data-theme="light"] .border-white\\/10': { borderColor: 'rgba(0, 0, 0, 0.08)' },
+        '[data-theme="light"] .border-white\\/6': { borderColor: 'rgba(0, 0, 0, 0.06)' },
+      })
+    }),
+  ],
 }
 

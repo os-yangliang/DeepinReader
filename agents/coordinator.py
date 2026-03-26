@@ -13,6 +13,7 @@ from services.vector_store import VectorStoreService
 from agents.parser_agent import ParserAgent, ParserResult
 from agents.summarizer_agent import SummarizerAgent, SummaryResult
 from agents.qa_agent import QAAgent, QAResult
+from prompts.templates import TRANSLATE_PROMPT, CODE_GENERATION_PROMPT, CODE_GENERATION_SYSTEM_PROMPT
 
 
 class PaperReaderState(TypedDict):
@@ -339,7 +340,7 @@ class PaperReaderCoordinator:
                 self.qa_agent.set_document_context(
                     doc_id=final_state["document_id"],
                     paper_title=parsed_doc.title if parsed_doc else "",
-                    paper_summary=final_state.get("summary", "")[:500]
+                    paper_summary=(final_state.get("summary") or "")[:500]
                 )
             
             total_time = time.time() - start_time
@@ -351,9 +352,9 @@ class PaperReaderCoordinator:
                     stage=final_state["current_stage"],
                     document_id=final_state.get("document_id", ""),
                     paper_title=parsed_doc.title if parsed_doc else "",
-                    structure_info=final_state.get("structure_info", ""),
-                    summary=final_state.get("summary", ""),
-                    keywords=final_state.get("keywords", ""),
+                    structure_info=final_state.get("structure_info") or "",
+                    summary=final_state.get("summary") or "",
+                    keywords=final_state.get("keywords") or "",
                     total_time=total_time,
                     stage_times=final_state.get("processing_times", {})
                 )
@@ -361,11 +362,13 @@ class PaperReaderCoordinator:
                 return ProcessingResult(
                     success=False,
                     stage=final_state.get("current_stage", "unknown"),
-                    error_message=final_state.get("error_message", "未知错误"),
+                    error_message=final_state.get("error_message") or "未知错误",
                     total_time=total_time
                 )
                 
         except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception("process_document 异常")
             return ProcessingResult(
                 success=False,
                 stage="exception",
@@ -404,6 +407,260 @@ class PaperReaderCoordinator:
     def clear_chat_history(self) -> None:
         """清除聊天历史"""
         self.qa_agent.clear_history()
+
+    # ==================== 拆分后的两步流程 ====================
+
+    def parse_and_index(self, file_bytes: bytes, filename: str) -> dict:
+        """
+        步骤1: 解析文档 + 建立向量索引（快速，~5秒，无 LLM 调用）
+        上传后立即可用问答/翻译/代码功能。
+        
+        Returns:
+            dict: 文档信息 {"filename", "title", "document_id", ...}
+        Raises:
+            Exception: 解析或索引失败
+        """
+        import hashlib
+        from services.document_parser import DocumentParser
+
+        # 解析文档
+        parser = DocumentParser()
+        parsed_doc = parser.parse_from_bytes(file_bytes, filename)
+
+        # 生成文档 ID
+        hash_input = f"{parsed_doc.filename}_{len(parsed_doc.content)}_{parsed_doc.content[:1000]}"
+        doc_id = hashlib.md5(hash_input.encode()).hexdigest()[:16]
+
+        # 存入向量库
+        self.vector_store.create_collection(doc_id)
+        base_metadata = {
+            "filename": parsed_doc.filename,
+            "file_type": parsed_doc.file_type,
+            "title": parsed_doc.title,
+            "page_count": parsed_doc.page_count,
+        }
+        if parsed_doc.chunks:
+            metadatas = [base_metadata.copy() for _ in parsed_doc.chunks]
+            self.vector_store.add_documents(parsed_doc.chunks, metadatas)
+        else:
+            self.vector_store.add_document_with_splitting(
+                parsed_doc.content, base_metadata
+            )
+
+        # 更新状态（此时 QA/Code/Translate 已可用）
+        self.current_state = {
+            "document_id": doc_id,
+            "parsed_doc": parsed_doc,
+            "summary": "",
+            "structure_info": "",
+            "keywords": "",
+            "current_stage": "indexed",
+        }
+
+        # 设置 QA Agent 上下文（暂无摘要，后续分析完成后更新）
+        self.qa_agent.set_document_context(
+            doc_id=doc_id,
+            paper_title=parsed_doc.title or "",
+            paper_summary="",
+        )
+
+        return {
+            "filename": parsed_doc.filename,
+            "title": parsed_doc.title,
+            "file_type": parsed_doc.file_type,
+            "page_count": parsed_doc.page_count,
+            "word_count": parsed_doc.word_count,
+            "document_id": doc_id,
+        }
+
+    def stream_analysis(self):
+        """
+        步骤2: 流式 LLM 分析（可选，独立于上传）
+        
+        Yields:
+            dict: {"stage": "analyzing", "chunk": "..."} 或 {"stage": "done", ...}
+        """
+        from prompts.templates import PAPER_ANALYSIS_PROMPT
+
+        if not self.current_state or not self.current_state.get("parsed_doc"):
+            yield {"stage": "error", "message": "请先上传文档"}
+            return
+
+        parsed_doc = self.current_state["parsed_doc"]
+        doc_id = self.current_state.get("document_id", "")
+
+        # 阶段1: 准备
+        yield {"stage": "progress", "percent": 10, "step": "preparing", "message": "正在准备分析..."}
+
+        # 智能截断内容
+        content = parsed_doc.content
+        max_len = 15000
+        if len(content) > max_len:
+            head = int(max_len * 0.6)
+            tail = max_len - head
+            content = content[:head] + "\n\n...(中间部分省略)...\n\n" + content[-tail:]
+
+        yield {"stage": "progress", "percent": 20, "step": "content_ready", "message": "文档内容准备就绪"}
+
+        prompt = PAPER_ANALYSIS_PROMPT.format(paper_content=content)
+
+        yield {"stage": "progress", "percent": 30, "step": "llm_start", "message": "AI 模型开始分析..."}
+
+        full_response = ""
+        chunk_count = 0
+        try:
+            for chunk in self.llm_service.stream_chat(prompt):
+                full_response += chunk
+                chunk_count += 1
+                yield {"stage": "analyzing", "chunk": chunk}
+                
+                # 每 10 个 chunk 发送一次进度（35% → 90%）
+                if chunk_count % 10 == 0:
+                    # 基于输出长度估算进度（假设正常分析 ~3000字）
+                    est_progress = min(90, 35 + int(len(full_response) / 3000 * 55))
+                    yield {"stage": "progress", "percent": est_progress, "step": "analyzing", "message": "AI 正在生成分析报告..."}
+        except Exception as e:
+            yield {"stage": "error", "message": f"AI 分析失败: {str(e)}"}
+            return
+
+        yield {"stage": "progress", "percent": 95, "step": "saving", "message": "正在保存分析结果..."}
+
+        # 更新状态
+        self.current_state["summary"] = full_response
+        self.current_state["current_stage"] = "analyzed"
+
+        # 用摘要更新 QA Agent
+        self.qa_agent.set_document_context(
+            doc_id=doc_id,
+            paper_title=parsed_doc.title or "",
+            paper_summary=full_response[:500],
+        )
+
+        yield {
+            "stage": "done",
+            "message": "分析完成",
+            "analysis": full_response,
+        }
+
+
+    def process_document_stream(self, file_bytes: bytes, filename: str):
+        """
+        流式处理文档（单次 LLM 调用，实时输出）
+        
+        Yields:
+            dict: SSE 事件，格式为:
+                {"stage": "parsing|parsed|analyzing|done", "message": "...", ...}
+                {"stage": "analyzing", "chunk": "..."}  # LLM 流式输出
+        """
+        import hashlib
+        from services.document_parser import DocumentParser
+        from prompts.templates import PAPER_ANALYSIS_PROMPT
+        
+        start_time = time.time()
+        
+        # ---- 阶段1: 解析文档 ----
+        yield {"stage": "parsing", "message": "正在解析文档..."}
+        
+        try:
+            parser = DocumentParser()
+            parsed_doc = parser.parse_from_bytes(file_bytes, filename)
+        except Exception as e:
+            yield {"stage": "error", "message": f"文档解析失败: {str(e)}"}
+            return
+        
+        # 生成文档ID
+        hash_input = f"{parsed_doc.filename}_{len(parsed_doc.content)}_{parsed_doc.content[:1000]}"
+        doc_id = hashlib.md5(hash_input.encode()).hexdigest()[:16]
+        
+        doc_info = {
+            "filename": parsed_doc.filename,
+            "title": parsed_doc.title,
+            "file_type": parsed_doc.file_type,
+            "page_count": parsed_doc.page_count,
+            "word_count": parsed_doc.word_count,
+            "document_id": doc_id,
+        }
+        
+        yield {
+            "stage": "parsed",
+            "message": f"解析完成：{parsed_doc.page_count} 页，{parsed_doc.word_count} 字",
+            "document_info": doc_info,
+        }
+        
+        # ---- 阶段2: 存入向量库 ----
+        yield {"stage": "indexing", "message": "正在建立知识索引..."}
+        
+        try:
+            self.vector_store.create_collection(doc_id)
+            base_metadata = {
+                "filename": parsed_doc.filename,
+                "file_type": parsed_doc.file_type,
+                "title": parsed_doc.title,
+                "page_count": parsed_doc.page_count,
+            }
+            if parsed_doc.chunks:
+                metadatas = [base_metadata.copy() for _ in parsed_doc.chunks]
+                self.vector_store.add_documents(parsed_doc.chunks, metadatas)
+            else:
+                self.vector_store.add_document_with_splitting(
+                    parsed_doc.content, base_metadata
+                )
+        except Exception as e:
+            yield {"stage": "error", "message": f"知识索引建立失败: {str(e)}"}
+            return
+        
+        yield {"stage": "indexed", "message": "知识索引建立完成"}
+        
+        # ---- 阶段3: 流式 LLM 分析（单次调用） ----
+        yield {"stage": "analyzing", "message": "AI 正在分析论文..."}
+        
+        # 智能截断内容
+        content = parsed_doc.content
+        max_len = 15000
+        if len(content) > max_len:
+            head = int(max_len * 0.6)
+            tail = max_len - head
+            content = content[:head] + "\n\n...(中间部分省略)...\n\n" + content[-tail:]
+        
+        prompt = PAPER_ANALYSIS_PROMPT.format(paper_content=content)
+        
+        full_response = ""
+        try:
+            for chunk in self.llm_service.stream_chat(prompt):
+                full_response += chunk
+                yield {"stage": "analyzing", "chunk": chunk}
+        except Exception as e:
+            yield {"stage": "error", "message": f"AI 分析失败: {str(e)}"}
+            return
+        
+        # ---- 阶段4: 完成 ----
+        total_time = time.time() - start_time
+        doc_info["processing_time"] = round(total_time, 1)
+        
+        # 更新 coordinator 状态
+        self.current_state = {
+            "document_id": doc_id,
+            "parsed_doc": parsed_doc,
+            "summary": full_response,
+            "structure_info": "",
+            "keywords": "",
+            "current_stage": "summarized",
+        }
+        
+        # 设置 QA Agent 上下文
+        self.qa_agent.set_document_context(
+            doc_id=doc_id,
+            paper_title=parsed_doc.title or "",
+            paper_summary=full_response[:500],
+        )
+        
+        yield {
+            "stage": "done",
+            "message": "分析完成",
+            "document_info": doc_info,
+            "analysis": full_response,
+            "total_time": round(total_time, 1),
+        }
     
     def get_current_document_info(self) -> Optional[Dict[str, Any]]:
         """获取当前文档信息"""
@@ -444,23 +701,6 @@ class PaperReaderCoordinator:
         yield f"📝 开始翻译论文（共 {len(chunks)} 个段落）...\n\n"
         yield "---\n\n"
         
-        # 翻译提示模板
-        translate_prompt = """你是一位专业的学术翻译专家。请将以下英文学术论文段落翻译成中文。
-
-要求：
-1. 保持学术风格，用语严谨
-2. 专业术语使用标准中文译法，首次出现时可标注英文原词
-3. 保持原文的段落结构和逻辑
-4. 数学公式、变量名保持原样
-5. 直接输出翻译结果，不要添加解释
-
----
-原文：
-{text}
----
-
-中文翻译："""
-        
         # 逐段翻译
         for i, chunk in enumerate(chunks, 1):
             text = chunk.page_content.strip()
@@ -475,8 +715,8 @@ class PaperReaderCoordinator:
             yield f"**原文：**\n> {text[:200]}{'...' if len(text) > 200 else ''}\n\n"
             yield f"**译文：**\n"
             
-            # 调用 LLM 翻译
-            prompt = translate_prompt.format(text=text)
+            # 使用统一的翻译 Prompt 模板
+            prompt = TRANSLATE_PROMPT.format(text=text)
             
             try:
                 for token in self.llm_service.stream_chat(
@@ -491,3 +731,79 @@ class PaperReaderCoordinator:
             yield "\n\n---\n\n"
         
         yield "\n✅ 翻译完成！"
+
+    def generate_code_stream(
+        self,
+        user_request: str = "生成论文核心算法的完整实现代码",
+        target_framework: str = "Python (PyTorch)",
+    ):
+        """
+        流式生成论文代码复现
+        
+        Args:
+            user_request: 用户对代码生成的具体需求
+            target_framework: 目标框架/语言
+            
+        Yields:
+            str: 生成的代码片段
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # 1. 获取论文标题和摘要
+        paper_title = ""
+        paper_summary = ""
+        if self.current_state:
+            parsed_doc = self.current_state.get("parsed_doc")
+            if parsed_doc:
+                paper_title = parsed_doc.title or ""
+            paper_summary = self.current_state.get("summary", "") or ""
+        
+        # 2. 从向量库中检索与代码生成相关的内容
+        search_queries = [
+            user_request,
+            "algorithm method implementation model architecture",
+            "experimental setup parameters hyperparameters",
+            "training procedure loss function optimization",
+        ]
+        
+        all_contexts = []
+        seen_contents = set()
+        
+        for query in search_queries:
+            try:
+                results = self.vector_store.search(query, top_k=3)
+                for doc in results:
+                    content = doc.page_content.strip()
+                    if content and content not in seen_contents:
+                        seen_contents.add(content)
+                        all_contexts.append(content)
+            except Exception as e:
+                logger.warning(f"向量检索失败: {e}")
+        
+        if not all_contexts:
+            yield "❌ 未找到文档内容，请先上传并分析论文。"
+            return
+        
+        # 3. 限制上下文长度（取最相关的前 8 个分块）
+        paper_context = "\n\n---\n\n".join(all_contexts[:8])
+        
+        # 4. 构建 Prompt
+        prompt = CODE_GENERATION_PROMPT.format(
+            paper_title=paper_title or "未知标题",
+            paper_summary=paper_summary[:1500] if paper_summary else "无摘要信息",
+            paper_context=paper_context,
+            user_request=user_request,
+            target_framework=target_framework,
+        )
+        
+        # 5. 流式生成
+        try:
+            for token in self.llm_service.stream_chat(
+                user_message=prompt,
+                system_prompt=CODE_GENERATION_SYSTEM_PROMPT,
+                chat_history=[],
+            ):
+                yield token
+        except Exception as e:
+            yield f"\n\n[代码生成出错: {str(e)}]"

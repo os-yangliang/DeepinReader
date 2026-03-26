@@ -54,6 +54,7 @@ class QAAgent:
         self.current_doc_id: Optional[str] = None
         self.current_paper_title: str = ""
         self.current_paper_summary: str = ""
+        self._cached_suggestions: Optional[List[str]] = None
     
     def set_document_context(
         self,
@@ -65,13 +66,20 @@ class QAAgent:
         设置当前文档上下文
         """
         try:
-            # 加载向量集合
+            # 短路：如果已经是同一个文档，更新元信息即可，不重新加载集合
+            if self.current_doc_id == doc_id:
+                self.current_paper_title = paper_title
+                self.current_paper_summary = paper_summary
+                return True
+
+            # 加载向量集合（内部已有短路缓存）
             success = self.vector_store.load_collection(doc_id)
             if success:
                 self.current_doc_id = doc_id
                 self.current_paper_title = paper_title
                 self.current_paper_summary = paper_summary
-                self.chat_history = []  # 重置聊天历史
+                self.chat_history = []
+                self._cached_suggestions = None  # 清除建议问题缓存
                 return True
             return False
         except Exception:
@@ -231,11 +239,46 @@ class QAAgent:
             yield "正在分析问题并制定检索计划...\n"
             steps = self._plan(question)
             
+            # 收集引用来源
+            source_docs = []
+            
             for step in steps:
                 tool_name = "论文" if step["tool"] == "paper" else "网络"
                 yield f"> 正在检索{tool_name}: {step['query']}...\n"
             
-            evidence = self._execute(steps)
+            # Execute 并收集源文档
+            evidence_parts = []
+            for i, step in enumerate(steps, 1):
+                tool = step["tool"]
+                query = step["query"]
+                
+                if tool == "paper":
+                    retriever = self.vector_store.get_retriever(k=3)
+                    try:
+                        if hasattr(retriever, 'get_relevant_documents'):
+                            docs = retriever.get_relevant_documents(query)
+                        else:
+                            docs = retriever.invoke(query)
+                    except Exception as e:
+                        logger.warning(f"Retriever error: {e}")
+                        docs = []
+                    
+                    for j, doc in enumerate(docs):
+                        meta = doc.metadata or {}
+                        page = meta.get("page", meta.get("page_number", "?"))
+                        source_docs.append({
+                            "text": doc.page_content[:200].strip(),
+                            "page": page,
+                            "section": meta.get("section", ""),
+                        })
+                    
+                    result_text = "\n".join([f"- {doc.page_content}" for doc in docs]) if docs else "(未找到相关内容)"
+                    evidence_parts.append(f"### 信息来源 {i} (论文检索): {query}\n{result_text}\n")
+                elif tool == "web":
+                    result_text = tool_service.web_search(query)
+                    evidence_parts.append(f"### 信息来源 {i} (网络搜索): {query}\n{result_text}\n")
+            
+            evidence = "\n".join(evidence_parts)
             
             yield "> 正在综合信息生成回答...\n\n"
             
@@ -254,6 +297,18 @@ class QAAgent:
             self.chat_history.append({"role": "assistant", "content": full_answer})
             if len(self.chat_history) > 20:
                 self.chat_history = self.chat_history[-20:]
+            
+            # 去重并输出引用来源
+            seen = set()
+            unique_sources = []
+            for s in source_docs:
+                key = s["text"][:80]
+                if key not in seen:
+                    seen.add(key)
+                    unique_sources.append(s)
+            
+            if unique_sources:
+                yield "\n__SOURCES__" + json.dumps(unique_sources[:5], ensure_ascii=False)
                 
         except Exception as e:
             yield f"回答出错: {str(e)}"
@@ -279,13 +334,39 @@ class QAAgent:
         return self.chat_history.copy()
     
     def get_suggested_questions(self) -> List[str]:
-        return [
+        """根据论文内容动态生成建议问题（带缓存）"""
+        # 如果有缓存，直接返回
+        if hasattr(self, '_cached_suggestions') and self._cached_suggestions:
+            return self._cached_suggestions
+
+        default_questions = [
             "这篇论文的主要研究问题是什么？",
             "论文使用了什么方法来解决问题？",
             "实验结果如何？有什么重要发现？",
             "这篇论文的创新点是什么？",
             "论文有什么局限性或不足？",
             "作者提出了哪些未来研究方向？",
-            "论文中使用了哪些数据集？",
-            "与其他方法相比，这个方法有什么优势？"
         ]
+        
+        # 如果有论文摘要，使用 LLM 生成个性化建议问题
+        if self.current_paper_summary and len(self.current_paper_summary) > 100:
+            try:
+                prompt = f"""根据以下论文摘要，生成 6 个对读者最有价值的具体问题。
+问题应当具体、有针对性，而不是泛泛而谈。每行一个问题，不要编号。
+
+论文标题: {self.current_paper_title or "未知"}
+论文摘要:
+{self.current_paper_summary[:1500]}
+
+请直接输出 6 个问题，每行一个："""
+                
+                result = self.llm_service.generate_with_prompt(prompt, {})
+                if result:
+                    questions = [q.strip().lstrip("0123456789.、）) ") for q in result.strip().split("\n") if q.strip()]
+                    if len(questions) >= 3:
+                        self._cached_suggestions = questions[:6]
+                        return self._cached_suggestions
+            except Exception as e:
+                logger.warning(f"动态生成建议问题失败，使用默认问题: {e}")
+        
+        return default_questions

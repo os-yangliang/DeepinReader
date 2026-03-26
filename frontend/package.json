@@ -10,8 +10,13 @@
   "dependencies": {
     "@vueuse/core": "^10.9.0",
     "axios": "^1.6.7",
-    "highlight.js": "^11.9.0",
+    "d3": "^7.9.0",
+    "highlight.js": "^11.11.1",
+    "jszip": "^3.10.1",
+    "lucide-vue-next": "^0.577.0",
     "marked": "^12.0.1",
+    "mermaid": "^11.13.0",
+    "phaser": "^3.90.0",
     "vue": "^3.4.21",
     "vue-pdf-embed": "^2.1.3",
     "vue-router": "^4.3.0"

@@ -2,6 +2,7 @@
 向量存储服务 - ChromaDB 集成 (支持混合检索 Hybrid Search)
 """
 import os
+import logging
 from typing import List, Optional, Dict, Any, Union
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
@@ -18,6 +19,9 @@ from config import (
     TOP_K_RESULTS
 )
 from services.chroma_client import get_chroma_client
+from services.text_utils import split_text
+
+logger = logging.getLogger(__name__)
 
 # 自定义简单的 EnsembleRetriever，解决版本兼容问题
 class SimpleEnsembleRetriever(BaseRetriever):
@@ -44,8 +48,7 @@ class SimpleEnsembleRetriever(BaseRetriever):
                 all_results.append(results)
             except Exception as e:
                 # 单个检索器失败不影响整体
-                import logging
-                logging.warning(f"Retriever failed: {e}")
+                logger.warning(f"Retriever failed: {e}")
                 all_results.append([])
         
         # 2. RRF 融合
@@ -118,44 +121,8 @@ class VectorStoreService:
             ) from e
 
     def _split_text(self, text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
-        """
-        将文本分割为固定大小的块。
-        """
-        if not text:
-            return []
-
-        separators = ["\n\n", "\n", "。", ".", "！", "!", "？", "?", "；", ";", " "]
-        chunks: List[str] = []
-        start = 0
-        text_length = len(text)
-
-        while start < text_length:
-            end = start + chunk_size
-            if end >= text_length:
-                last = text[start:].strip()
-                if last:
-                    chunks.append(last)
-                break
-
-            search_start = max(start + chunk_size - 100, start)
-            best_split = end
-
-            # 向后/向前在边界附近寻找分割点
-            for sep in separators:
-                pos = text.rfind(sep, search_start, min(end + 50, text_length))
-                if pos != -1 and pos > search_start:
-                    best_split = pos + len(sep)
-                    break
-
-            chunk = text[start:best_split].strip()
-            if chunk:
-                chunks.append(chunk)
-
-            start = best_split - chunk_overlap
-            if start < 0:
-                start = 0
-
-        return chunks
+        """将文本分割为固定大小的块（委托给共享工具函数）"""
+        return split_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     
     def create_collection(self, collection_id: str) -> None:
         """
@@ -174,6 +141,30 @@ class VectorStoreService:
         # 重置缓存
         self._document_chunks_cache = []
         self.bm25_retriever = None
+
+    def load_collection(self, collection_id: str) -> bool:
+        """
+        切换到已存在的向量集合（多文档支持）
+        """
+        if self._current_collection_id == collection_id:
+            return True  # 已经是当前集合
+        
+        try:
+            collection_name = f"{self.collection_name}_{collection_id}"
+            Chroma = self._get_chroma_class()
+            client = get_chroma_client(self.persist_directory)
+            self.vector_store = Chroma(
+                client=client,
+                collection_name=collection_name,
+                embedding_function=self.embeddings,
+            )
+            self._current_collection_id = collection_id
+            self._document_chunks_cache = []
+            self.bm25_retriever = None
+            return True
+        except Exception as e:
+            logger.error(f"加载集合失败: {e}")
+            return False
     
     def add_documents(
         self,
@@ -248,8 +239,12 @@ class VectorStoreService:
     
     def load_collection(self, collection_id: str) -> bool:
         """
-        加载已存在的集合
+        加载已存在的集合（带短路缓存：如果集合已加载则跳过）
         """
+        # 短路：目标集合已加载，无需重复拉取 + 重建 BM25 索引
+        if self._current_collection_id == collection_id and self.vector_store is not None:
+            return True
+
         collection_name = f"{self.collection_name}_{collection_id}"
         
         try:
@@ -262,10 +257,8 @@ class VectorStoreService:
             )
             self._current_collection_id = collection_id
             
-            # 加载集合时，需要从 Chroma 中拉取所有文档来重建 BM25 索引
-            # 这是一个耗时操作，但为了 Hybrid Search 是必须的
-            # 生产环境建议将 BM25 索引也序列化保存
-            results = self.vector_store.get() # 获取所有文档
+            # 从 Chroma 中拉取所有文档来重建 BM25 索引
+            results = self.vector_store.get()
             
             self._document_chunks_cache = []
             if results and results['documents']:
@@ -342,8 +335,7 @@ class VectorStoreService:
                                 Document(page_content=text, metadata=meta)
                             )
                 except Exception as e:
-                    import logging
-                    logging.warning(f"加载文档分块失败: {e}")
+                    logger.warning(f"加载文档分块失败: {e}")
         
         # 按 chunk_index 排序
         sorted_chunks = sorted(
@@ -352,6 +344,44 @@ class VectorStoreService:
         )
         return sorted_chunks
     
+    def search(self, query: str, top_k: int = TOP_K_RESULTS) -> List[Document]:
+        """
+        语义搜索（兼容旧接口，委托给 similarity_search）
+        
+        Args:
+            query: 搜索查询
+            top_k: 返回的最相关结果数量
+            
+        Returns:
+            List[Document]: 相关文档列表
+        """
+        return self.similarity_search(query, k=top_k)
+
+    def delete_collection(self, collection_id: str) -> bool:
+        """
+        删除向量集合
+        
+        Args:
+            collection_id: 集合ID
+            
+        Returns:
+            bool: 是否成功删除
+        """
+        collection_name = f"{self.collection_name}_{collection_id}"
+        try:
+            client = get_chroma_client(self.persist_directory)
+            client.delete_collection(name=collection_name)
+            # 如果删除的是当前集合，重置内部状态
+            if self._current_collection_id == collection_id:
+                self.vector_store = None
+                self._current_collection_id = None
+                self._document_chunks_cache = []
+                self.bm25_retriever = None
+            return True
+        except Exception as e:
+            logger.warning(f"删除集合失败: {e}")
+            return False
+
     def get_full_text(self) -> str:
         """
         获取完整文档文本（按顺序拼接所有分块）

@@ -285,7 +285,7 @@ class HistoryStoreService:
                 source_chunks = []
                 try:
                     source_chunks = json.loads(metadata.get("source_chunks", "[]"))
-                except:
+                except Exception:
                     pass
                     
                 chat_list.append({
@@ -315,7 +315,7 @@ class HistoryStoreService:
         Returns:
             bool: 是否成功
         """
-        return self._delete_chat_history_by_document(f"h_{document_id}")
+        return self._delete_chat_history_by_document(document_id)
     
     def _delete_chat_history_by_document(self, history_id: str) -> bool:
         """根据历史记录ID删除相关对话"""
