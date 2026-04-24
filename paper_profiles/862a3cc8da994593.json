@@ -1,0 +1,1239 @@
+{
+  "document_id": "862a3cc8da994593",
+  "title": "You Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary Projects",
+  "abstract": "",
+  "sections": [
+    {
+      "section_id": "sec_1",
+      "title": "全文",
+      "level": 1,
+      "section_type": "other",
+      "content": "--- 第 1 页 ---\n.\n.\nLatest updates: hps://dl.acm.org/doi/10.1145/3728922\n.\n.\nRESEARCH-ARTICLE\nYou Name It, I Run It: An LLM Agent to Execute Tests of\nArbitrary Projects\nISLEM BOUZENIA, University of Stugart, Stugart, Baden-\nWuremberg, Germany\n.\nMICHAEL PRADEL, University of Stugart, Stugart, Baden-\nWuremberg, Germany\n.\n.\n.\nOpen Access Support provided by:\n.\nUniversity of Stugart\n.\nPDF Download\n3728922.pdf",
+      "start_line": 1,
+      "end_line": 24
+    },
+    {
+      "section_id": "sec_2",
+      "title": "January 2026",
+      "level": 1,
+      "section_type": "other",
+      "content": "Total Citations: 2\nTotal Downloads:\n1032\n.\n.\n.\n.\nPublished: 22 June 2025\nAccepted: 31 March 2025\nReceived: 27 February 2025\n.\n.\nCitation in BibTeX format\n.\n.\nProceedings of the ACM on Soware Engineering, Volume 2, Issue ISSTA (June 2025)\nhps://doi.org/10.1145/3728922\nEISSN: 2994-970X\n.\n\n--- 第 2 页 ---\nYou Name It, I Run It:\nAn LLM Agent to Execute Tests of Arbitrary Projects\nISLEM BOUZENIA, University of Stuttgart, Germany\nMICHAEL PRADEL, University of Stuttgart, Germany\nThe ability to execute the test suite of a project is essential in many scenarios, e.g., to assess code quality and\ncode coverage, to validate code changes made by developers or automated tools, and to ensure compatibility\nwith dependencies. Despite its importance, executing the test suite of a project can be challenging in practice\nbecause different projects use different programming languages, software ecosystems, build systems, testing\nframeworks, and other tools. These challenges make it difficult to create a reliable, universal test execution\nmethod that works across different projects. This paper presents ExecutionAgent, an automated technique that\nprepares scripts for building an arbitrary project from source code and running its test cases. Inspired by the\nway a human developer would address this task, our approach is a large language model (LLM)-based agent\nthat autonomously executes commands and interacts with the host system. The agent uses meta-prompting to\ngather guidelines on the latest technologies related to the given project, and it iteratively refines its process\nbased on feedback from the previous steps. Our evaluation applies ExecutionAgent to 50 open-source projects\nthat use 14 different programming languages and many different build and testing tools. The approach\nsuccessfully executes the test suites of 33/50 projects, while matching the test results of ground truth test suite\nexecutions with a deviation of only 7.5%. These results improve over the best previously available technique by\n6.6x. The costs imposed by the approach are reasonable, with an execution time of 74 minutes and LLM costs\nof USD 0.16, on average per project. We envision ExecutionAgent to serve as a valuable tool for developers,\nautomated programming tools, and researchers that need to execute tests across a wide variety of projects.\nCCS Concepts: • Software and its engineering →Development frameworks and environments;\nAdditional Key Words and Phrases: large language models, LLM agents, autonomous software development,\nproject setup automation, test suite execution, devops, software testing, artificial intelligence\nACM Reference Format:\nIslem Bouzenia and Michael Pradel. 2025. You Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary\nProjects. Proc. ACM Softw. Eng. 2, ISSTA, Article ISSTA047 (July 2025), 23 pages. https://doi.org/10.1145/3728922\n1",
+      "start_line": 25,
+      "end_line": 74
+    },
+    {
+      "section_id": "sec_3",
+      "title": "Introduction",
+      "level": 1,
+      "section_type": "introduction",
+      "content": "Executing the test suite of a software project is a critical step in various activities during software\ndevelopment and software engineering research. For human developers who are contributing to\nopen-source projects, running the tests before submitting a pull request ensures that their changes\ndo not introduce regressions. Likewise, the increasing popularity of large language model (LLM)\nagents that autonomously edit a project’s code [3, 20, 33, 42, 45] creates a huge demand for a\nfeedback mechanism to validate modifications [25, 32], and executing the test suite provides such a\nmechanism. Finally, researchers also depend on running tests, e.g., to evaluate the effectiveness\nof dynamic analyses [8] or to create benchmarks involving test execution, such as Defects4J [16],\nSWE-Bench [14], and DyPyBench [4].\nAuthors’ Contact Information: Islem Bouzenia, University of Stuttgart, Germany, fibouzenia@esi.dz; Michael Pradel,\nUniversity of Stuttgart, Germany, michael@binaervarianz.de.\nThis work is licensed under a Creative Commons Attribution 4.0 International License.\n© 2025 Copyright held by the owner/author(s).\nACM 2994-970X/2025/7-ARTISSTA047\nhttps://doi.org/10.1145/3728922\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 3 页 ---\nISSTA047:2\nIslem Bouzenia and Michael Pradel\nUnfortunately, executing the tests of an arbitrary project is far from straightforward in practice.\nProjects are developed in various programming languages and ecosystems, each with its own set\nof tools, dependencies, and conventions. Complex dependencies can pose significant challenges,\nespecially when specific versions of libraries or tools are required. Documentation is often incom-\nplete, inconsistent, or entirely missing, forcing developers to infer the necessary steps. Moreover,\nprojects may have implicit assumptions about the environment, such as operating system specifics\nor required system configurations, that are not explicitly stated. The diversity of testing frameworks\nfurther complicates the process, as each framework has a unique setup and execution procedure.\nCurrently, there are three primary methods for executing the tests of a given project, each with\nnotable limitations. The first method involves manually following the project’s documentation\nand resolving any issues through trial-and-error. This approach is time-consuming and does\nnot scale well with the number of projects. The second method is to reuse existing continuous\nintegration/continuous deployment (CI/CD) workflows employed by project maintainers. However,\nnot all projects have such workflows, and even when they exist, their execution often depends\non a specific CI/CD platform, such as GitHub Actions, which is not fully accessible to the public.\nDirectly using CI/CD workflows is further complicated by the fact that there are several popular\nplatforms, each with its own configuration scripts and technology stack. The third method is to\nimplement an automated, heuristic script designed to cover common cases. Such scripts typically\nfocus on a single programming language and ecosystem, and they lack the flexibility to handle\narbitrary projects: For example, Flapy [12] works only on Python projects that are available on\nPyPy, and even within the Python ecosystems fails to successfully run many test suites. Another\nexample is the pipeline used to create GitBug-Java [31], which, starting from 66,042 repositories,\neventually managed to execute the tests of only 228 repositories.\nAn effective solution would need to address multiple challenges. First, the approach should\nbe aware of the latest technologies and tools for a range of popular programming languages.\nSecond, the approach should be capable of understanding incomplete and partially outdated\ndocumentation. Third, the approach needs a way to interact with the system, such as executing\ncommands, monitoring outputs, and handling errors. Finally, the approach must be able to assess\nwhether the setup process has been successful, and if not, address any problems until the test\nsuite runs successfully. To the best of our knowledge, there is currently no existing work that\naddresses these challenges. This gap presents a substantial obstacle for developers, automated\ncoding techniques, and researchers who need a reliable and scalable solution for running tests\nacross a wide variety of projects. Motivated by these challenges, the question addressed in this\nwork is: Given an arbitrary project, how can we automatically build the project and run its test suite?\nThis paper presents ExecutionAgent, the first LLM-based agent for autonomously setting up\narbitrary projects and executing their test suites. The approach addresses the four challenges\ndescribed above as follows. For the first challenge, we present the novel concept of meta-prompting,\nwhich asks a recently trained LLM to automatically generate up-to-date, technology-specific, and\nprogramming language-specific guidelines instead of manually engineering and hard-coding a\nprompt. We address the second challenge by using the LLM to parse and understand the project’s\ndocumentation and web resources related to the project. To handle the third challenge, we connect\nthe agent to a set of tools, such as a terminal, to execute commands, monitor outputs, and interact\nwith the system. Finally, we address the fourth challenge by enabling the agent to iteratively refine\nits process based on feedback from previous steps, similar to how a human developer would work.\nTo evaluate ExecutionAgent, we apply it to 50 open-source projects that use 14 different program-\nming languages and many different build and testing tools. The approach successfully sets up and\nexecutes the test suites of 33/50 projects. Comparing to several baselines, such as manually designed\nand LLM-generated scripts targeting projects in a specific language, as well as a general-purpose\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 4 页 ---\nYou Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary Projects\nISSTA047:3\nLLM-based agent, we find ExecutionAgent to outperform the best available technique by 6.6x. To\nvalidate the test executions, we compare them against a manually established ground truth and find\nthat the test results (in terms of the number of passed, failed, and skipped tests) closely resemble\nthe ground truth, with an average deviation of 7.5%. Studying the costs of the approach, we find\nthat the average execution time is 74 minutes per project, and the average LLM costs are USD 0.16\nper project. Overall, these results demonstrate that ExecutionAgent has the potential to serve as a\nvaluable tool for developers, automated programming tools, and researchers that need to execute\ntests across a wide variety of projects.\nIn summary, this paper contributes the following:\n(1) The first autonomous, LLM-based agent for automatically setting up arbitrary projects and\nexecuting their test suites.\n(2) The novel concept of meta-prompting, which allows the agent to query an LLM for the latest\nguidelines and technologies related to building projects and running test suites.\n(3) Several technical insights on design decisions that enable the agent to effectively interact with\nthe system, execute commands, monitor outputs, and handle errors.\n(4) Empirical evidence that the approach can successfully execute the test suites of a wide variety\nof projects, clearly outperforming existing techniques.\n2",
+      "start_line": 75,
+      "end_line": 166
+    },
+    {
+      "section_id": "sec_4",
+      "title": "Approach",
+      "level": 1,
+      "section_type": "method",
+      "content": "The following presents our approach for executing the test of arbitrary projects. We start by defining\nthe problem we aim to address (Section 2.1), then provide an overview of our approach (Section 2.2),\nand finally describe the components of our approach in detail (Sections 2.3 and 2.4).\n2.1\nProblem Statement\nThe problem we aim to address is the following: Given a software project, identified, e.g., by a URL\nof a git repository or a file path, we want to automatically generate scripts to install the project\nand run its tests. Specifically, the desired output consists of two scripts: one to create an isolated\nenvironment, such as a container, and one to build the project and run its tests within the isolated\nenvironment. By running the tests, we mean executing the project’s test suite and collecting the\nresults, such as the number of tests that pass, fail, and are skipped.\nWe aim to address this problem in a way that offers two important properties. First, the approach\nshould be technology-agnostic, i.e., it should support projects written in different programming\nlanguages, using different build systems, and using different testing frameworks. This property is\ncrucial as it allows the approach to be used across a wide range of projects. Second, the approach\nshould be fully automated, i.e., it should not require any manual intervention or additional infor-\nmation beyond the project itself. This property is essential to ensure that the approach can be used\nat scale and without human intervention.\nThe formulated problem has, to the best of our knowledge, not been addressed by prior work. In\nparticular, existing approaches either focus on specific programming languages or ecosystems [12,\n31] or are based on significant manual intervention [4].\n2.2\nOverview of ExecutionAgent\nWe address the above problem by presenting an approach that leverages LLMs and the concept of\nLLM agents. By LLM agent we here mean a system that uses an LLM to autonomously interact\nwith a set of tools in order to achieve a specific goal [25]. The tools we use are similar to those a\nhuman tasked with setting up a project might use, such as commands available via a terminal. The\nintuition behind this approach is that the LLM can “understand” various sources of information,\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 5 页 ---\nISSTA047:4\nIslem Bouzenia and Michael Pradel\nMeta-prompting\nLanguage-\nspecific\nguidelines\nContainerization\nguidelines\nLocations of \nCI scripts\nWeb search\nDocs &\ntutorials\nInstallation hints\nRead and summarize\nPrompt ingredients\nProject repository\nPreparation phase\nTools\nCommand\nprompt\nCommand\nto execute\nInvoke\ncommand\nTool\noutput\nCleaned\ntool\noutput\nSummary\n1\n2\n3\nFeedback phase\nScripts to execute test suite\nSummarization\nControl center\nLLM\nFig. 1. Overview of ExecutionAgent.\nsuch as project documentation, existing scripts, and the output of tools, and use this understanding\nto decide on the steps necessary to execute the tests of the given project. As shown in Figure 1, the\napproach encompasses two phases, which we briefly describe in the following.\nPhase 1: Preparation. Given a project repository, this phase gathers information required to\nconstruct the initial prompt of the agent, called prompt ingredients. A key challenge is creating these\nprompt ingredients in a technology-agnostic way, as the project may be written in any program-\nming language and use any testing framework. Our approach addresses this challenge through\nmeta-prompting, a novel concept that allows the agent to query an LLM for the latest guidelines\nand technologies related to building projects and running test suites. Specifically, ExecutionAgent\nuses meta-prompting to generate language-specific guidelines, guidelines about the latest con-\ntainerization technology, and possible locations of commonly used CI/CD scripts. In addition, the\napproach queries the web to gather hints on building the given project. Finally, our approach uses\nan LLM to generate general-purpose, language-independent guidelines for creating a build and test\nenvironment for an arbitrary project. These guidelines help the agent follow a high-level plan to\nreach its goals. The generated and gathered information is then passed as prompt ingredients to\nthe second phase.\nPhase 2: Feedback loop. This phase repeatedly invokes tools, as guided by the LLM, in order\nto build the project and execute its test suite. Specifically, ExecutionAgent repeatedly iterates\nthrough three steps. Step 1 queries the LLM for the next command to execute, using a dynamically\nupdated command prompt that contains the prompt ingredients from Phase 1 and a summary of\nthe already invoked commands. Step 2 executes the command suggested by the LLM by invoking\none of the tools. Because the output of a tool may be verbose and contain irrelevant information,\nstep 3 requests the LLM to summarize the output and extract the most relevant information.\nThe summarized output is then used to update the command prompt, and the three steps repeat\nuntil the agent determines that the test suite has been successfully executed. This entire process is\nmanaged by a component we call the control center.\nThe steps taken by ExecutionAgent are described in more detail in Algorithm 1, which we will\nexplain in the following sections.\n2.3\nPreparation Phase\nThe preparation phase is motivated by two goals: (1) to gather project-specific information that\ncould be helpful for building the given project and running its tests, and (2) to obtain guidelines\nthat will help the LLM agent invoke the right tools and commands during the feedback loop in\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 6 页 ---\nYou Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary Projects\nISSTA047:5\nAlgorithm 1 High-level algorithm of ExecutionAgent\nInput: Repository URL 𝑢\nOutput: Scripts to set up an environment and run tests\n1: // Phase 1: Preparation\n2: lang_guidelines ←LLM(\"Give language-specific guidelines\", get_languages(𝑢))\n3: container_guidelines ←LLM(\"Give guidelines on recent containerization technology\")\n4: ci_paths ←LLM(\"Give common locations of CI scripts within a repo\")\n5: ci_hints ←read_ci_scripts_and_summarize(𝑢, ci_paths)\n6: install_hints ←search_web(𝑢)\n7:\n8: // Phase 2: Feedback loop\n9: attempts_left ←3\n10: p_attempt_lessons ←\"\"\n11: while attempts_left do\n12:\np_cmd ←create_command_prompt(lang_guidelines, container_guidelines, ci_hints, install_hints,\np_attempts_lessons),\n13:\nbudget_left ←40\n14:\nwhile budget_left do\n15:\n// Step 1: Get next command\n16:\nthought, cmd ←LLM(p_cmd)\n17:\n// Step 2: Execute command\n18:\ncmd_result ←execute(cmd)\n19:\nif cmd == \"task_done\" and valid(cmd_result) then\n20:\nscripts ←read_target_files()\n21:\nreturn scripts\n22:\nend if\n23:\n// Step 3: Summarize command output\n24:\np_summarize ←create_prompt(p_cmd, cmd_result)\n25:\ncmd_result_summary ←LLM(p_summarize)\n26:\np_cmd ←update_prompt(p_cmd, thought, cmd, cmd_result_summary)\n27:\nbudget_left ←budget_left −1\n28:\nend while\n29:\nattempts_left ←attempts_left −1\n30:\np_attempt_lessons ←𝑎𝑛𝑎𝑙𝑦𝑧𝑒_𝑐𝑜𝑚𝑚𝑎𝑛𝑑𝑠_𝑎𝑛𝑑_𝑡ℎ𝑜𝑢𝑔ℎ𝑡𝑠(𝑐𝑚𝑑_𝑙𝑖𝑠𝑡,𝑡ℎ𝑜𝑢𝑔ℎ𝑡𝑠_𝑙𝑖𝑠𝑡)\n31: end while\nphase 2. To reach these goals, we follow a set of steps that are detailed in Algorithm 1 between\nlines 1 and 6, and which we present in detail in the following. Since several of these steps use the\nidea of meta-prompting, we begin by explaining this concept.\n2.3.1\nMeta-Prompting. A key challenge faced by ExecutionAgent is that technologies and best\npractices for building software projects and running test suites are constantly evolving. One way\nto address this challenge would be to spend significant amounts of time in engineering suitable\nprompts for the LLM agent. Such prompts should provide guidelines on how to use common build\ntools, package managers, testing frameworks, etc. for all the programming languages, software\necosystems, and tools that the agent might encounter. However, this approach comes with several\ndrawbacks: it is time-consuming, unlikely to cover all relevant technologies, and may become\noutdated quickly.\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 7 页 ---\nISSTA047:6\nIslem Bouzenia and Michael Pradel\nGuidelines Meta Prompt (for Java)\nI want to install and run tests of a Java project. Give a list of 10 guidelines that I should follow to achieve my task (e.g.,\nto figure out installation steps, dependencies, how to run tests) while considering latest practices and technologies.\nLLM Response\n1. Review Project Documentation and README\nWhy: Documentation typically includes installation steps, dependencies, and setup instructions.\nWhat to do: Check the README.md or other documentation files for prerequisites and specific instructions for installation\nand testing.\n2. Verify Java Version Compatibility\nWhy: Java projects may target specific versions (...)\nWhat to do: Confirm the Java version required by checking the pom.xml (Maven) or build.gradle (Gradle) file (...)\n3. Check for Dependency Management Tool\n(...)\n10. Generate Test Reports for Results and Debugging\nWhy: Test reports provide detailed logs and summaries, aiding in debugging.\nWhat to do: Maven projects can use mvn surefire-report:report to generate reports. Gradle usually generates HTML\nreports by default (build/reports/tests/test/index.html).\nFig. 2. Meta-prompting to obtain guidelines for Java projects. Response shortened for brevity.\nInstead of engineering such prompts manually, we leverage the impressive knowledge of LLMs\nto generate prompts with up-to-date guidelines targeted at the given project. Since LLMs are often\ntrained on a vast range of documents, including documents describing the latest technological\ndevelopments, they offer a built-in mechanism for adapting to evolving technology landscapes. We\nleverage this capability by using a high-level prompt, called a meta-prompt, to query the LLM for\ntechnology-specific guidelines and other information, which we then use to construct the command\nprompt for the agent. Specifically, ExecutionAgent uses meta-prompting to generate three kinds of\nprompt ingredients, which we describe in the following.\n2.3.2\nLanguage-Specific and Language-Independent Guidelines. During initial experiments, we\nobserved that the LLM agent benefits from guidelines that describe how to typically build projects\nwritten in a specific language and how to run their tests. Adopting the idea of meta-prompting,\nExecutionAgent creates such guidelines by querying an up-to-date LLM to generate a list of\nlanguage-specific guidelines. To this end, we heuristically infer the main programming language of\nthe project during the preparation phase (using GitHub’s Linguist library1) and use this information\nto generate the language-specific guidelines.\nFigure 2 illustrates an example of a meta-prompt for a Java project and the response from the\nLLM. The prompt asks for a list of ten guidelines for a specific programming language. The reason\nfor asking for a specific number of guidelines is that otherwise, the LLM sometimes generates only\na few broad guidelines, which are lacking in detail, or may generate an extensively long list, which\nis hard to process. To avoid such variation, we explicitly request a specific number, and we found\nten to be sufficiently comprehensive.\nIn addition to creating language-specific guidelines, we instruct the agent to collect further\ninformation about the projects and tests using a set of language-independent guidelines that we\nalso generate with an LLM. These language-independent guidelines ensure that our approach\n1https://github.com/github-linguist/linguist\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 8 页 ---\nYou Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary Projects\nISSTA047:7\nSummarization response\n{ 'summary ': 'The karma.conf.js file configures the testing framework for Bootstrap ,\nutilizing Jasmine for unit testing and Rollup for preprocessing. It supports headless\ntesting with Chrome and Firefox , and includes configurations for coverage reporting and\nBrowserStack integration.',\n'extracted dependencies ': ['jasmine ', 'karma ', 'karma -jasmine ','karma -rollup -preprocessor '\n, 'karma -chrome -launcher ', 'karma -firefox -launcher ', 'karma -detect -browsers ', 'karma -\ncoverage -istanbul -reporter '],\n'important commands ': ['npm test'],\n'important files/links/hyperlinks ': [] }\nFig. 3. Example of an LLM-generated summary.\nremains effective even when a project’s setup does not strictly adhere to the common practices of\nits main language, for instance, due to significant influence from secondary languages.\n2.3.3\nContainer Guidelines. To ensure that the project’s tests are executed in an isolated environ-\nment, ExecutionAgent aims at building and testing the project inside a container. Similar to the\nlanguage-specific guidelines, we use meta-prompting to query the LLM for guidelines on the latest\nand most used containerization technology. For example, at the moment of writing, the GPT-4o\nmodel responds to our meta-prompt by stating that Docker is the best option.\n2.3.4\nExisting CI/CD Scripts. Some projects include CI/CD scripts that provide hints about installa-\ntion steps and project dependencies. To leverage such scripts, ExecutionAgent follows a three-step\nprocess. First, it uses meta-prompting to query the LLM for common folder names, file names,\nand extensions associated with CI/CD scripts. Second, based on the obtained list, it searches the\nrepository for matching files and folders. Third, the identified files are analyzed by the LLM to\ndetermine which files are relevant to building and testing.\nWhile CI/CD scripts can sometimes be outdated or incomplete, they may still provide useful\ninsights into the overall setup process and any required non-standard steps. To extract the most\nrelevant information, ExecutionAgent queries an LLM with the raw file contents, asking it to\nprovide: (1) a concise natural language summary of the script, (2) a list of project dependencies, (3)\nimportant commands for setting up and testing, and (4) references to relevant files or links. Figure 3\nshows an example of the LLM’s response to the summarization prompt.\n2.3.5\nWeb Search. Some projects maintain explicit and structured documentation on external\nplatforms, such as readthedocs.com, which can provide clearer installation instructions than their\nrespective GitHub repositories. Additionally, search engines efficiently retrieve the most relevant\nresources based on a few keywords, reducing the need for exhaustive exploration.\nTo leverage web resources, ExecutionAgent queries a search engine with “How to install the\n<LANGUAGE> project ’<PROJECT>’ from source code?”, where <LANGUAGE> and <PROJECT>\ncorrespond to the project’s primary programming language and name, respectively. Instead of pars-\ning webpages sequentially—which would increase the number of queries and associated costs—the\napproach extracts text from the top five results and asks an LLM to summarize them. The summa-\nrization process extracts relevant build and test dependencies, as well as installation steps, including\ncommands and configuration details. If a search result lacks useful installation hints, the model is\ninstructed to return: “This page does not contain setup-related information.”\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 9 页 ---\nISSTA047:8\nIslem Bouzenia and Michael Pradel\n2.4\nFeedback Phase\nBased on the prompt ingredients obtained in the preparation phase, the second phase of our\napproach is a feedback phase that iteratively invokes tools to build the project and execute its test\nsuite. As shown in lines 8 to 31 of Algorithm 1, the feedback phase consists of two nested loops.\nThe inner loop runs a series of commands, guided by the LLM, until either the test suite completes\nsuccessfully or a configurable command limit (default: 40) is reached. The outer loop allows for\nmultiple attempts to build and execute the test suite, with a configurable maximum number of\nattempts (default: 3). This design allows recovery from occasional failures where the build process\nencounters an error, preventing the tests from running. By allowing multiple attempts, the system\ncan adjust its approach to overcome such errors. At the start of each outer loop iteration, the\nsystem incorporates lessons learned from the previous attempt (if any) into the command prompt.\nThese lessons are generated by prompting the LLM to analyze the previous sequence of thoughts\nand commands, identify challenges encountered, and suggest adjustments for the next iteration\n(line 30). Each iteration of the inner loop consists of three steps, as outlined in Figure 1 and detailed\nin the following.\n2.4.1\nStep 1: LLM Selects the Next Command. The core of our approach is an LLM that selects\nthe next command to execute based on the current state of the installation process. To guide the\nLLM in selecting the next command, the approach constructs a command prompt that contains\nthe prompt ingredients obtained in the preparation phase, as well as a summary of the commands\nexecuted so far. The command prompt consists of predefined static sections, and dynamic sections,\nwhich are either created based on the preparation phase (line 12) or updated at the end of each\niteration of the inner loop (line 26). Specifically, the prompt contains the following sections:\n(1) Agent role (static): Defines the primary task of the agent and the success criteria. Concretely,\nthe agent’s role is to build the given project and ensure that the test cases execute properly.\n(2) Goals (static): Outlines the specific objectives the agent must accomplish, namely:\n• Gather installation-related information and requirements.\n• Write scripts to build the project and execute its tests.\n• Run the produced scripts and refine them, if necessary.\n• Analyze the test execution results and summarize them by providing the number of passing,\nfailing, and skipped tests.\n(3) Tools (static): Lists the tools available to the agent. We describe the tools in detail in Section 2.4.2.\n(4) Guidelines (dynamic): Contains the programming language-specific guidelines and the con-\ntainerization guidelines obtained in the preparation phase.\n(5) Installation hints (dynamic): Contains the installation hints obtained from any existing CI/CD\nscripts and the web search. It also contains lessons learned from previous iterations of the\nouter feedback loop.\n(6) Tool invocation history (dynamic): Summarizes the tools invoked so far, as well as the output\nthat was produced. Initially, this section is empty.\n(7) Instruction for creating the next command prompt (static): Specifies that the LLM should\nprovide the next command to execute based on the context available in the prompt. We define\nthe expected format of the LLM’s response in a TypeScript interface, as shown in Figure 4. The\nexpected format includes the agent’s thoughts, as well as the name of the tool to invoke and\nthe arguments to pass to the tool. The rationale for asking the LLM to describe its thoughts is\ntwo-fold: First, it has been shown empirically to improve the quality of the LLM’s responses [38].\nSecond, it allows for easier debugging and understanding of the LLM’s decisions. If the LLM fails\nto respond in this format, the control center returns an error message to the LLM, mentioning\nthe usage of the wrong format and reminding the LLM of the correct one.\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 10 页 ---\nYou Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary Projects\nISSTA047:9\nTest results\ninterface Response {// Express your thoughts based on the information that you have\ncollected so far , the possible steps that you could do next , and also your reasoning.\nthoughts: string;\ntool: {name: string; args: Record <string , any >; }; }\nHere is an example of a command call that you can output:\n{ \"thoughts\": \"I need to check the files and folders available within this repository.\",\n\"tool\": {\"name\": \"linux_terminal\", \"args\": {\"cmd\": \"ls\"} } }\nFig. 4. TypeScript interface to specify the JSON format of the LLM’s response to the command prompt.\n2.4.2\nStep 2: Invoking Tools. To enable our approach to take the steps necessary for building the\nproject and running its tests, we provide four tools to the agent. ExecutionAgent invokes these\ntools based on the LLM’s response to the command prompt (lines 17 to 22).\nTerminal. Similar to human developers, access to a terminal is crucial to successfully set up a\nproject and run its tests, e.g., to build dependencies or list available files. We provide the agent with\nthe capability to execute any command available in a Linux terminal via the linux_terminal tool.\nThe tool takes a command to execute as input and returns the output of the command.\nFile I/O Tools. While the terminal would, in principle, be sufficient to perform any kind of\noperation on the system, we provide two additional tools for interacting with the file system. These\ntools are meant to emulate the developer’s interaction with text editors, where they open a file,\nread parts of it, and sometimes make changes by writing to it. The read_file tool takes a file\npath as input and returns the content of the file. The write_file tool takes a file path and content\nas input and writes the content to the file. The latter tool is particularly useful for writing the\nscripts expected as the output of ExecutionAgent, e.g., a Dockerfile that creates a container and\na install.sh script with the sequence of commands to build dependencies, compile or build the\nproject, and eventually run the test suite.\nEnd of Task. In addition to the tools described above, we provide the agent with a special tool\ncalled task_done. This tool is used to signal that the agent has successfully completed its task, i.e.,\nthat the project has been built and its tests have been executed. The tool expects a natural language\ndescription that explains why the agent has finished the task.\n2.4.3\nStep 3: Summarization and Extraction. The output of tools can be verbose and contain lots of\nirrelevant information. For example, suppose the agent executes a command to list all files in a\ndirectory or reads the content of a file, then simply returning the output of the tool to the LLM for\nthe next command would quickly exceed the available prompt size. Even with LLMs that offer a\nlarge prompt size, it is beneficial to reduce the amount of information in the prompt to keep the\nagent focused on the most important information and to reduce the overall costs of the approach.\nTo reduce the amount of text that results from a tool invocation, ExecutionAgent shortens the\noutput whenever the output exceeds a certain number of tokens (default: 200). The approach asks\nanother LLM to summarize the output and extract the most relevant information (lines 24 to 25).\nThe expected format for the summary is the same as illustrated in Figure 3. Once the output of the\nmost recently invoked command has been summarized, the approach appends the command and\nits output summary to the tool invocation history section of the command prompt (line 26).\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 11 页 ---\nISSTA047:10\nIslem Bouzenia and Michael Pradel\n2.4.4\nControl Center. The control center orchestrates the three steps described above, managing\nthe interaction between the LLMs and the tools. Specifically, it performs the following tasks:\n• Parse the LLM output and validate whether it conforms to the specified output format.\n• Invoke the next step as specified in Algorithm 1, e.g., by executing a specific command.\n• Monitor tool execution by tracking launched processes within the container and detecting\nwhen they terminate. Since some commands may take a long time before producing any output,\nmerely watching stdout and stderr is insufficient. Instead, the control center ensures that process\ncompletion is explicitly detected. The complete stdout and stderr outputs are returned to the\nLLM once the process terminates.\n• Enforce a configurable timeout (default: five minutes) for any command execution. If a command\ndoes not finish within this interval, the control center provides the LLM agent with the available\noutput and process status. The LLM then decides among three options: (1) wait for another five\nminutes, (2) provide input to the running tool (useful for interactive prompts, such as confirming\nan installation with “y”), or (3) terminate the command.\n• Clean the output of tools by removing terminal color codes and other special characters, such as\nthose used for progress bars.\nWhen the agent selects the task_done command, it indicates that the agent believes that the\nproject has been successfully built and that its test suite has been executed. Before terminating\nExecutionAgent, the control center validates that the agent has indeed met all goals. This involves\nchecking whether three files exist: a file to create a container (e.g., a Dockerfile), an installation\nscript to be executed within the container, and a file that contains the test results (i.e., the number\nof passed, failed, and skipped tests). If all goals are met, ExecutionAgent returns the installation and\ntest scripts to the user (line 21). Otherwise, the control center provides feedback to the LLM agent,\npointing out what exactly is missing, and asks for a new command. Figure 5 gives an example of\nthe scripts produced for the OpenVPN project. The two scripts show the configuration chosen by\nExecutionAgent, the installed dependencies, and the steps to build the project and execute its tests.\n3\nEvaluation\nOur evaluation aims to answer to following research questions:\n• RQ1 (effectiveness): How effective is ExecutionAgent at correctly setting up projects and running\ntheir test cases?\n• RQ2 (costs): What are the costs of ExecutionAgent in terms of execution time and token usage\nwhen interacting with the LLM?\n• RQ3 (ablation study): What is the impact of different components and configurations?\n• RQ4 (trajectories): How does ExecutionAgent interact with the tools, and what trajectories does\nit take to reach the goal?\n3.1",
+      "start_line": 167,
+      "end_line": 586
+    },
+    {
+      "section_id": "sec_5",
+      "title": "Experimental Setup",
+      "level": 1,
+      "section_type": "experiment",
+      "content": "3.1.1\nImplementation and Model. ExecutionAgent is implemented in Python and bash. To allow\nfor an isolated execution of ExecutionAgent itself, we use a Docker container. The agent is based\non OpenAI’s GPT-4o-mini model, which we access through their Python API. The usage of other\nmodels is possible as long as they support JSON output format specified through an interface. At\nthe moment of writing the paper, Claude, DeepSeek, and Llama models support this feature.\n3.1.2\nMetrics. The task performed by ExecutionAgent consists of two sub-tasks: (i) building the\nproject, and (ii) running the test suite. We measure how effective the approach is at performing\nthese tasks by measuring the successful build rate, i.e., the proportion of projects where the approach\nmanages to correctly build the project, and the successful testing rate, i.e., the proportion of projects\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 12 页 ---\nYou Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary Projects\nISSTA047:11\nDockerfile\nFROM ubuntu :20.04\n# Set the timezone to avoid interactive prompts\nENV TZ=XXX/YYY # omitted for anonymity\nRUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone\n# Update package lists and install necessary build tools and dependencies\nRUN apt -get update && \\\napt -get install -y --no-install -recommends \\\nsudo \\\nbuild -essential \\\nliblzo2 -dev \\\nlibpam0g -dev \\\nliblz4 -dev \\\nlibcap -ng -dev \\\nlibnl -genl -3-dev \\\nlinux -libc -dev \\\nautoconf \\\nautomake \\\nlibtool \\\ncmocka -dev \\\npython3 -docutils \\\ngit \\\n&& apt -get clean && rm -rf /var/lib/apt/lists/* || exit 0\nWORKDIR /app\n# Clone the OpenVPN repository\nRUN git clone https :// github.com/OpenVPN/openvpn.git || exit 0\nWORKDIR /app/openvpn\nCMD [\"bash\"]\ninstall_and_run.sh\n#!/bin/bash\n# Run autoconf to prepare the build system\nautoreconf -fvi\n# Configure the build system\n./ configure --enable -werror\n# Compile the project\nmake -j$(nproc)\n# Run tests\nmake check VERBOSE =1\necho \"Setup␣and␣testing␣complete.\"\nFig. 5. Scripts produced by ExecutionAgent for the OpenVPN project.\nwhere the approach manages to run the test suite. To determine these rates, we manually inspect\nthe produced scripts and the test results.\nTo better understand the output of ExecutionAgent, we measure the script size of the produced\nscripts, which we define as the number of commands, excluding any comments, white spaces, and\n“echo” commands. We split composite commands and count their components individually. For\nexample, the line make . && make test is counted as two commands make . and make test.\nTo validate the test suite executions, we compare the test execution results produced by Execution-\nAgent with a manually established ground truth. The ground truth is obtained by searching for\nCI/CD logs of the targeted projects, and by extracting the number of passed, failed, and skipped\ntests. We compare the results of ExecutionAgent with the ground truth in terms of these three\nnumbers. Specifically, we compute the deviation from ground truth as deviation = | (𝑛𝑏𝐸𝐴−𝑛𝑏𝐺𝑇)\n𝑛𝑏𝐺𝑇\n|∗100,\nwhere 𝑛𝑏𝐸𝐴is the number of tests produced by ExecutionAgent and 𝑛𝑏𝐺𝑇is the number of tests in\nthe ground truth. For example, if among the tests executed by ExecutionAgent, there are 95 passing\ntests, while the ground truth has 100 passing tests, then the deviation is 5%. We compute a separate\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 13 页 ---\nISSTA047:12\nIslem Bouzenia and Michael Pradel\ndeviation for the number of passing, failing, and skipped tests, and then average these deviations\nto obtain the overall deviation.\n3.1.3\nDataset. To construct a dataset for evaluating ExecutionAgent, we gather 50 open-source\nprojects from GitHub. The following describes the selection criteria and process.\nCriteria for selecting projects. We select projects that meet the following criteria: (i) Diversity\nin programming languages: We select ten projects each for Python, Java, C, C++, and JavaScript,\nensuring that each project has one of these languages as either the dominant or second most-used\nlanguage. (ii) Availability of ground truth test execution results: We ensure that test execution results\nare accessible through logs from CI/CD platforms. As different projects use different platforms, we\ncollect ground truth data from GitHub Actions, CircleCI, Jenkins, CirrusCI, and occasionally, from\na project’s website (e.g., for TensorFlow). Our selection process prioritizes projects that maintain\npublicly accessible, detailed reports of test execution results, such as build/test logs on CI/CD\nplatforms. One indicator of this is the presence of a CI/CD badge in the repository’s README. (iii)\nProject maturity and activity: Each selected project has at least 100 stars and 100 commits, with at\nleast one commit made within the six months prior to data collection. This criterion ensures that\nthe repositories are active and maintained.\nDataset construction process. Our dataset construction follows a systematic process to ensure\nquality and relevance. We search for the most popular projects for each of the five primary languages\nand rank them based on their popularity (number of stars and forks). We then manually inspect\nprojects, starting at the top of the ranked list, to check whether they meet the selection criteria\ndescribed above. If a project does not meet the criteria, we move to the next project in the list. We\ncontinue this process until we have collected 50 projects that meet the criteria.\nDataset statistics. The projects in our dataset exhibit significant activity and complexity. The\nmedian project has approximately 10K commits, 45K stars, and 1.4K test cases. The code in the 50\nselected projects is written in 14 programming languages. When considering only test code, the\nprojects cover 8 languages, including Kotlin, Scala, and TypeScript, in addition to the five primary\nlanguages. On average, 87% of the tests are written in the main language of the project. Some\nprojects write test cases in different languages than their main language, though. For example, the\nCPython project has many test cases written in Python that test code implemented in C.\nFrom another perspective, 38 out of the 50 projects use automated build tools or provide configu-\nration files for them.\nAll projects in the dataset are capable of running on a Linux system, as confirmed by logs\nretrieved from CI/CD results. The dataset also highlights variations in CI/CD usage: 33 out of 50\nprojects contain scripts for both building and testing, 10 projects have build scripts only, and 7\nprojects lack both build and test scripts. Additionally, 9 projects contain submodules, indicating a\nhigher degree of structural complexity. Table 1 lists all 50 projects and their characteristics.\n3.1.4\nBaselines. To the best of our knowledge, there is no existing technique that addresses the\nsame problem as ExecutionAgent. However, we compare our approach to three related baselines,\nwhich represent the state of the art in this domain.\nLLM scripts. LLMs have seen large amounts of data, including documentation on how to install\nprojects. We leverage this feature to ask an LLM to generate a script that prepares an environment\nto build an arbitrary project and run its tests. As our dataset is gathered by focusing on five main\nlanguages, we ask the LLM to create one specialized script for each of these five languages. The\nprompt we use is given in Figure 6. Given the script created in response to this prompt, we attempt\nto build a project using the script corresponding to the project’s main language.\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 14 页 ---\nYou Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary Projects\nISSTA047:13\nTable 1. Projects used for the evaluation. Languages: J=Java, P=Python, JS= JavaScript, TS= TypeScript,\nKT=Kotlin, ASM=Assembly, SH=Shell. Symbols: + means successfully built but tests not executed, - means\nfailed to build.\nProject\nLanguages\nGround Truth\nExecutionAgent\nTests\nPass\nFail\nSkip\nTests\nPass\nFail\nSkip\nActiviti\nJ\n3269\n3266\n0\n3\n2392\n2389\n1\n2\nansible\nP\n1717\n1703\n0\n14\n+\n+\n+\n+\naxios\nJS, TS\n203\n203\n0\n0\n203\n195\n8\n0\nbootstrap\nJS, Html/css\n808\n808\n0\n0\n808\n793\n15\n0\nccache\nC, SH\n47\n36\n0\n11\n47\n36\n0\n11\nChart.js\nJS, TS\n3298\n3298\n0\n0\n+\n+\n+\n+\ncommons-csv\nJ\n856\n845\n0\n11\n856\n845\n0\n11\ncpython\nP, C, C++\n478\n462\n0\n16\n478\n433\n4\n42\ndeno\nJS, TS, Rust\n1458\n1446\n0\n12\n511\n474\n36\n1\ndistcc\nC, P\n57\n57\n0\n0\n57\n53\n4\n0\ndjango\nP\n17604\n16151\n5\n1448\n17605\n16148\n6\n1451\ndubbo\nJ\n14020\n13678\n0\n342\n14020\n13678\n0\n342\nexpress\nJS\n1228\n1228\n0\n0\n1228\n1228\n0\n0\nflask\nP\n484\n481\n0\n3\n484\n480\n1\n3\nflink\nJ, Scala, P\n105242\n100644\n0\n4598\n+\n+\n+\n+\nfolly\nC++, P\n3089\n3088\n0\n0\n-\n-\n-\n-\nFreeRTOS\nC, ASM\n215\n215\n0\n0\n-\n-\n-\n-\ngit\nC, SH, Perl\n31715\n31715\n0\n0\n30264\n29203\n265\n796\nguava\nJ\n857221\n857221\n0\n0\n857221\n857221\n0\n0\nimgui\nC++, C\n348\n348\n0\n0\n-\n-\n-\n-\njson\nC++\n93\n93\n0\n0\n93\n93\n0\n0\njson-c\nC\n25\n25\n0\n0\n25\n25\n0\n0\nkeras\nP\n12110\n11860\n0\n250\n12775\n12445\n10\n320\nlangchain\nP\n1358\n887\n0\n471\n+\n+\n+\n+\nlibevent\nC\n68\n68\n0\n0\n68\n68\n0\n0\nmermaid\nJS, TS\n3106\n3104\n0\n2\n3287\n3276\n0\n11\nmpv-player\nC\n14\n14\n0\n0\n-\n-\n-\n-\nmsgpack-c\nC\n41\n41\n0\n0\n-\n-\n-\n-\nmybatis\nJ\n1870\n1851\n0\n19\n1870\n1851\n0\n19\nnest\nJS\n1655\n1655\n0\n0\n1655\n1655\n0\n0\nnode\nJS, C++, P\n4218\n4218\n0\n0\n-\n-\n-\n-\nnumpy\nP, C, C++\n44861\n43197\n0\n1629\n-\n-\n-\n-\nopencv\nC++, C, P\n232\n216\n0\n16\n232\n216\n0\n16\nopenvpn\nC\n96\n95\n0\n1\n91\n85\n2\n4\npandas\nP, C\n199448\n172973\n1025\n25486\n183384\n171565\n2233\n9586\npytest\nP\n3762\n3640\n11\n111\n3805\n3775\n11\n119\nreact\nJS, TS, Rust\n5509\n5509\n0\n0\n9764\n9738\n1\n25\nreact-native\nC++, J, JS\n158\n158\n0\n0\n158\n158\n0\n0\nrocketmq\nJ\n2336\n2324\n0\n12\n2336\n2324\n0\n12\nRxJava\nJ\n11863\n9404\n0\n2459\n11863\n9395\n9\n2459\nscikit-learn\nP, C, C++\n37064\n31900\n125\n5039\n37729\n32546\n128\n5055\nscipy\nP, C, C++\n52672\n49745\n0\n2767\n+\n+\n+\n+\nspring\nJ, KT\n117\n74\n0\n43\n117\n74\n0\n43\ntensorflow\nC++, P\n3148\n0\n0\n0\n+\n+\n+\n+\nTypeScript\nJS\n96598\n96598\n0\n0\n96598\n96598\n0\n0\nvue\nTS, JS\n1449\n1449\n0\n0\n1449\n1449\n0\n0\nwebpack\nJS\n28935\n28815\n0\n120\n-\n-\n-\n-\nwebview\nC++, C, P\n12\n12\n0\n0\n-\n-\n-\n-\nxgboost\nC++, P, R\n208\n207\n0\n1\n+\n+\n+\n+\nxrdp\nC, C++\n206\n206\n0\n0\n+\n+\n+\n+\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 15 页 ---\nISSTA047:14\nIslem Bouzenia and Michael Pradel\nPrompt for LLM scripts baseline\nCreate a script that automatically installs a <LANGUAGE> project (on an Ubuntu Linux machine) from source code\nand runs test cases. The script should account for differences between projects, test frameworks, and dependencies\ninstallation. The script should be as general as possible, but should also handle special cases that you are aware of.\nFig. 6. Prompt to generate general-purpose installation scripts (“LLM scripts” baseline).\nInput to AutoGPT baseline\nYou are an AI assistant specialized in automatically setting up a given project and running its test cases. For your task,\nyou must fulfill the following goals:\n1. Gather installation-related information and requirements for the project <GITHUB URL>\n2. Write a bash script (.sh) that allows to install dependencies, prepare the environment, and launch test case execution.\n3. Refine the script if necessary: If an error happens or the output is not expected, refine the script.\n4. Once the script launches the test suite successfully, analyze the results of running the test suite to further check\nwhether there are any major problems (for example, some test cases would fail because the project or environment is not\nwell configured, which would mean that the previous goals were not achieved).\nFig. 7. Input given to the AutoGPT baseline.\nAutoGPT. Instead of creating a specialized agent for the task of automatically setting up arbitrary\nprojects, one could also use a general-purpose LLM-based agent. We compare against such an\nagent, AutoGPT2 [41], which, given a task description, autonomously reasons about a task, makes a\nplan, executes, and updates the plan over multiple iterations. Similar to ExecutionAgent, AutoGPT\nmay call tools, such as web search, reading and writing files, and executing Python code. As a task\ndescription, we provide the input shown in Figure 7. We use the same model and provide the same\nbudget (maximum number of iterations) to AutoGPT as for ExecutionAgent.\nFlapy. This baseline is a human-written script written to automatically set up arbitrary Python\nprojects and run their test cases.3 The script was originally developed as part of a study of test\nflakiness [12], and by design, is limited to Python projects.\n3.2\nEffectiveness\nExecutionAgent. The results of applying ExecutionAgent to the 50 projects are reported in Table 1\nand summarized in Table 2. ExecutionAgent successfully builds and tests 33 out of 50 projects.\nOut of the 33 successfully tested projects, ExecutionAgent achieves results identical to the ground\ntruth in 17/33, while the rest (16 out 33) have an average deviation of 15.4%. In Table 2, we consider\nExecutionAgent results to be close to the ground truth if the average deviation is less than 10%.\nOverall, these results show that ExecutionAgent is effective at executing the test suites of a large\nnumber of projects, and that the results are close to or equal to the ground truth in most cases.\nTo better understand the results, we analyze the projects by their main language (Figure 8). For\neach language, we show the number of projects that fail to build, are successfully built, and have\ntheir test suites executed. The results show that ExecutionAgent is most effective for Java, where it\nsuccessfully builds and tests all projects. The two languages that are the most difficult to handle are\nC and C++, which we attribute to the less standardized build and test processes in these languages,\nwhich often requires recompiling packages to be compatible with current system dependencies\nand project requirements.\n2https://github.com/Significant-Gravitas/AutoGPT\n3https://github.com/se2p/FlaPy\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 16 页 ---\nYou Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary Projects\nISSTA047:15\nTable 2. Effectiveness of ExecutionAgent and comparison to baselines.\nExecutionAgent\nLLM scripts\nAutoGPT\nFlapy\nBuilt\n41 / 50\n29 / 50\n9 / 50\n6 / 10\nExecuted tests\n33 / 50\n5 / 50\n4 / 50\n0 / 10\nGround truth deviation < 10%\n29 / 50\n4 / 50\n2 / 50\n0 / 10\nAnother perspective that we analyze is the presence of configurations for automated build tools\nin the project repositories. Among the 50 projects, 38 use automated build tools, such as Make and\nCmake (in 14 projects), Npm and Yarn (13 projects), and Maven/Gradle (9 projects). ExecutionAgent\nsuccessfully runs the tests of 28 out of the 38 projects that use automated build tools, while the\napproach succeeds for 5 out of the 12 projects not using such tools. On the one hand, this result\nshows that the configuration and automation available within the project itself is a factor in the\nsuccess of ExecutionAgent. On the other side, the result also shows that ExecutionAgent is capable\nof handling projects that lack such automation.\nWe also study the presence and impact of submodules. Submodules usually are standalone\nrepositories that are included within the target project as a dependency and should be installed\nalong with the target project. Our dataset has 9 projects that use submodules. We find that Execution-\nAgent struggles with such projects, as only 2 out of 9 reach a successful test suite execution.\nFinally, we compare the individual test case outcomes between ExecutionAgent and the ground\ntruth. In 17 out of 33 tested projects, the same test sets were executed with matching outcomes.\nAmong the remaining 16 projects, 99.9% of passing test cases aligned with the ground truth, but\ndeviation arose primarily in failing test cases. A detailed analysis of five projects with deviations\nrevealed three key factors contributing to these differences. First, some projects are structured into\nindependent modules with separate builds and test suites. For example, in the Activiti project, a\nfailure in compiling the bpmn converter module halted the remaining testing process, though an\nexisting option could have allowed the continuation of tests in other modules, which Execution-\nAgent did not invoke. Second, incomplete dependency installations may cause test failures or errors.\nIn the Axios project, for instance, the absence of a headless Chromium binary resulted in an error,\npreventing 8 test cases from executing. Third, we attribute certain differences to test flakiness as\nerrors occurred without clear indications of missing dependencies or setup issues.\nComparison with LLM scripts. In Table 2, we compare ExecutionAgent to the three baselines.\nThe general-purpose, LLM-generated scripts successfully build many projects (29/50), but then\noften often fail to execute the test suites (only 5/29 succeed). Inspecting the results, we find that\nthe LLM scripts often do not account for the differences between the setup required by a regular\nuser and the development setup. The development setup often involves additional steps, such as\ninstalling additional software (e.g., a compiler, glibc-32, or a testing framework), recompiling some\ndependencies, or changing configuration files. In contrast, the usage setup is much simpler, often\nusing an already complete requirement/setup file, such as setup.py for Python and pom.xml for\nJava. Because the LLM scripts do not account for these differences, they often fail to execute the\ntest suite, whereas ExecutionAgent is able to iteratively fix unexpected errors.\nComparison with AutoGPT. Even though AutoGPT is given the same budget as ExecutionAgent,\nit builds only 9/50 projects and successfully runs the tests suites for only 4 of them. The results\nshow that the task of running the tests of arbitrary projects is non-trivial, and that a specialized\nagent, such as ExecutionAgent is more effective at such tasks. Fundamentally, ExecutionAgent\ndiffers from AutoGPT by using meta-prompting, by managing the memory of already performed\ncommands more effectively, and by using more sophisticated and robust tools.\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 17 页 ---\nISSTA047:16\nIslem Bouzenia and Michael Pradel\nC\nJavaScript\nPython\nC++\nJava\nMain Language\n0\n2\n4\n6\n8\n10\nNumber of Projects\nProject Status\nBuild Failure\nBuild Only\nTests Executed\nFig. 8. Effectiveness of ExecutionAgent by main lan-\nguage.\nBuild Failure\nBuild Only\nTests Executed\nAll projects\nProject Status\n0.0\n0.2\n0.4\nCost in USD\nFig. 9. Monetary costs due to LLM usage.\nComparison with Flapy. The right-most column of Table 2 compares with the Flapy baseline.\nBecause this baseline only targets Python, we apply it only to the 10 projects in our dataset that\nhave Python as their main language. The results show that Flapy reaches results similar to LLM-\ngenerated, general-purpose scripts in terms of building projects. However, like the LLM scripts, it\nalso struggles to execute the test suites, and cannot successfully complete the tests of any of the\n10 projects. Given the same 10 Python projects, ExecutionAgent successfully builds and tests 6 of\nthem, all with testing results identical to the ground truth.\n3.3\nCosts\nWe evaluate the costs incurred by ExecutionAgent in terms of execution time and token usage.\nThe average time required by ExecutionAgent to process a project is 74 minutes (on a 256GB RAM\nXeon(R) Silver 4214 machine with five projects being processed in parallel). Given that the most\nreliable alternative to our approach is to manually set up and test the projects, we consider the\ntime costs of ExecutionAgent to be acceptable.\nExecutionAgent relies on an LLM, which incurs costs computed in terms of token usage. Figure 9\nshows the monetary costs due to the usage of the LLM. Based on current pricing, the average\ncost of processing a project is USD 0.16. The costs differs significantly depending on whether\nExecutionAgent succeeds in building and testing the project. For projects that fail to build or test,\nthe costs are higher because ExecutionAgent tries to fix any issues until exhausting the budget,\nleading to an average cost of USD 0.34. In contrast, for projects where the approach succeeds, the\ncosts are lower, with an average of only USD 0.10. Overall, we consider the current costs to be\nacceptable given the benefits of the approach, and expect costs to decrease over time as LLMs\nbecome more efficient and cheaper.\n3.4",
+      "start_line": 587,
+      "end_line": 1402
+    },
+    {
+      "section_id": "sec_6",
+      "title": "Ablation Study",
+      "level": 1,
+      "section_type": "ablation",
+      "content": "To evaluate the contributions of different components of ExecutionAgent, we conduct an ablation\nstudy with multiple variants. The studied variants are as follows:\n• No preparation phase: The agent starts directly with the feedback phase, lacking the structured\ninformation from meta-prompting and retrieval.\n• No feedback phase: Instead of iteratively refining its approach, the agent generates a single\nscript using the information from the preparation phase.\n• No guidelines: The agent does not use language-specific or general guidelines, reducing its\nability to follow common installation and testing conventions.\n• No external retrieval: No external information from web search or CI/CD scripts.\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 18 页 ---\nYou Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary Projects\nISSTA047:17\nTable 3. Ablation study with four variants of ExecutionAgent.\nBuilt | Executed tests | Deviation < 10% | Project cost (USD)\nExecutionAgent\n41\n33\n29\n0.16\nNo preparation phase\n12\n8\n7\n0.19\nNo feedback phase\n19\n5\n5\n0.02\nNo guidelines\n26\n15\n15\n0.15\nNo CI/Web retrieval\n31\n24\n23\n0.18\nFig. 10. Distribution of most frequently used terminal commands (./file represents calls to local scripts).\nTable 3 presents the results of these variants compared to the full approach. The ablated versions\ndemonstrate significantly lower performance. Removing the preparation phase leads to a notable\ndrop in success rates (12 successful builds and only 8 test executions), highlighting the importance\nof structured planning and context retrieval. The absence of feedback further reduces effectiveness,\nas it eliminates the iterative refinement process, leading to only 5 successful test executions. We\nlearn that generated guidelines play a crucial role, as without them, the effectiveness drops by\n50%. While retrieving external information (e.g., CI/CD configurations and via web search) are\nimportant, removing it only drops the success rate by 21% and increases costs by 13%. Overall,\nthese findings emphasize the importance of both the preparation phase and the feedback phase in\nensuring successful project setup and testing.\n3.5\nAnalysis and Discussion\n3.5.1\nUsage of Tools. To understand the behavior of ExecutionAgent, we start by a quantitative\nanalysis of its tool usage. Overall, 74.8% of calls made by the approach invoke the tool terminal,\nwhile 16.0% and 8.2% invoke write_file and read_file, respectively. The “end of task” tool accounts\nfor 1% of all tool invocations. This high-level analysis shows that ExecutionAgent uses all available\ntools, and that the terminal seems to be indispensible.\nTo further uncover the commands executed through the terminal, we count the frequency of all\ninvoked commands. Figure 10 shows the results for the top-10 commands. We find that commands\nfor exploring directories and files, such as ls, cd, and pwd, are common, summing up to 33%. Another\nsubset of popular commands (21%) is installation and build commands, such as apt install for\nsystem packages, pip for python and npm for JavaScript. Finally, approximately 25% of executed\ncommands fall outside the top 10, demonstrating that ExecutionAgent utilizes a diverse command\nset, making a hard-coded selection of commands ineffective.\n3.5.2\nAnalysis of Trajectories. We also perform a qualitative analysis of the trajectories of the\nagent, where “trajectory” refers to the sequence of steps that ExecutionAgent takes when dealing\nwith a specific project. The following describes three observations made during this analysis.\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 19 页 ---\nISSTA047:18\nIslem Bouzenia and Michael Pradel\nRecurring phases: Setup, dependencies, testing. The trajectories of many projects, particularly\nsoftware libraries, such as react-native, commons-csv, and pytest, include three clearly identifiable\nphases: (1) Setup: The agent typically starts with preparation commands, such as ls, followed by\nreading necessary files (e.g., README.md, pom.xml, or package.json) to understand the project struc-\nture. (2) Dependency management: Commands like write_to_file for creating Dockerfiles or setup\nscripts are prevalent. For instance, when creating a Dockerfile, the approach indicates the images\nto use, e.g., FROM node:20 or FROM python:3.10-slim, followed by invoking additional commands to\ninstall dependencies using apt-get and package managers like npm or yarn. (3) Execution of tests:\nSubsequently, the approach issues commands to run tests (e.g., npm test, pytest) and then confirms\nthat the tests were executed as expected. Successful test execution is typically followed by logging\nof results, and by creating the scripts that ExecutionAgent is tasked to produce.\nConsistent Docker usage. Many trajectories involve using Docker to create isolated environments\nfor applications (e.g., docker build, docker run). We observe two specific uses of Docker: (1) Building\nand running containers: For projects that provide their own Dockerfile, the agent often uses this\nDockerfile to create an environment and install dependencies. (2) Debugging and validating the\nenvironment: ExecutionAgent uses commands like docker images and docker ps to check that\ncontainer images were created and to inspect running containers, showcasing an emphasis on\nensuring the runtime environment is correctly configured.\nError handling and resilience. ExecutionAgent demonstrates an ability to handle errors and\nunexpected outcomes effectively. In particular, we observe the following strategies: (1) Fallback\nactions: Many commands in the produced scripts include fallback logic, such as using || to specify\nalternative actions when a command fails. (2) Cleanup commands: Commands are sometimes\ncombined with cleanup actions to ensure that the environment is left in a consistent state, and that\ncommands do not accumulate unnecessary files in case of errors.\n3.5.3\nComplexity of Scripts Generated by ExecutionAgent. We measure the script size (Section 3.1.2)\nto assess the complexity of the scripts generated by ExecutionAgent. Across the 33 successful\nprojects, the average script size is 18, with a minimum of 12 and a maximum of 37. That is, the final\nsetup requires running 16 commands, on average. While this number may not seem particularly\nhigh, the scripts are concise because the agent creates them once it has found a successful sequence\nof commands.\n3.5.4\nLimitations. Through manual trajectory analysis, we identify two behaviors that frequently\ncontribute to not succeeding in executing the tests. First, the agent often repeats the same mistake,\nleading to wasted commands. A common pattern is attempting to use sudo when it is unavailable,\nresulting in the agent correcting itself after an error, yet repeating the mistake in subsequent\ncommands. Second, ExecutionAgent often fails to follow up on certain commands. For instance,\nwhen installing a new version of Node or gcc, the old version frequently remains the default, unless\nexplicitly changed. This oversight leads to repeated cycles of checking versions, installing new\nones, and failing to set them as default, causing errors and wasting resources.\n4\nThreats to Validity\nOur results are subject to several threats to validity. First, ExecutionAgent typically runs tests\nin a single configuration (e.g., one language version, browser, or operating system), which may\nnot capture variations across different environments, such as multiple browsers or OS versions.\nThis limitation can be addressed by allowing users to modify the prompt to specify the desired\nconfigurations. Second, the approach is designed around modern technologies (e.g., as asked for in\nthe meta-prompt), which may limit the effectiveness for projects that require older dependencies.\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 20 页 ---\nYou Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary Projects\nISSTA047:19\nHowever, this limitation is mitigated by the technique’s iterative approach, allowing it to detect\nand adapt to legacy dependencies when necessary. Third, the approach has been primarily tested\non popular projects with relatively good documentation. Results could differ on less well-known or\npoorly documented projects. In addition, a lot of projects in our dataset do not use submodules,\nwhich seem to challenge ExecutionAgent. Finally, our criteria for selecting projects, especially the\navailability of ground truth test execution results, may bias the dataset toward projects that use\nsome form of CI/CD. Addressing this potential bias would require another way of establishing a\nground truth, such as manually performing the task addressed by ExecutionAgent and comparing\nthe results to those produced by the approach.\n5",
+      "start_line": 1403,
+      "end_line": 1542
+    },
+    {
+      "section_id": "sec_7",
+      "title": "Related Work",
+      "level": 1,
+      "section_type": "related_work",
+      "content": "Large language models in software engineering. The field of software engineering has seen a rapid\nincrease in the use of LLMs in recent years. Generating code for a given function-level comment\nhas become a standard task to evaluate the capabilities of LLMs [5, 19]. To make code generation\npractical also for real-world software development, researchers have proposed techniques to\naugment prompts with repository-level context [7, 9, 30, 44]. Beyond generating application code,\nLLMs have been used to generate unit tests [10, 17, 18, 23, 27, 28], to translate code from one language\ninto another [26], and to fuzz test programs that accept code as their input, such as compilers [40].\nThese approaches demonstrate the potential of LLMs to automate software development tasks\nthat require understanding and generating code. In addition to creating new code from scratch,\nLLMs have been used for modifying existing code. One line of work focuses on predicting code\nedits based on previously performed edits [13, 37]. Other work tries to automate common code\nchanges, such as refactorings [6]. A team at Meta shows how to use LLMs for augmenting existing,\nhuman-written tests [1]. Finally, there is work on multi-step code editing [2], where an LLM first\nplans multiple edit steps and then performs them one after the other.\nOur work differs from all the above by focusing not directly on code, but on the task of setting up\nand running test suites of software projects. We envision LLM-based techniques for code generation\nand code editing to benefit from our work by using the executable test suites as a feedback signal\nto evaluate the correctness of the generated code.\nLLM-based agents. Recent work has started to explore the power of LLM-based agents in soft-\nware engineering tasks. The most prominent agents focus on automated program repair, e.g., in\nRepairAgent [3] and on automatically addressing issues that describe bugs, missing features, and\nother improvements of a code base, e.g., in SWE-Agent [42], MarsCode Agent [20], Magis [33], and\nAutoCodeRover [45]. Another line of work explores an agent trying to describe the root cause of a\nsoftware failure [24]. We refer to a recent survey for a more comprehensive overview of recent\nwork [15]. To the best of our knowledge, our work is the first to explore the use of LLM-based\nagents for setting up and running test suites of software projects.\nThe concept of autonomous LLM agents is, of course, not limited to software engineering. In\n2022, researchers proposed to let LLMs generate and execute code to answer a given question [11].\nBuilding on this idea, others propose to augment LLMs with other tools invoked via APIs [22,\n29]. The ReAct work [43] shows that LLM agents can outperform LLMs alone in a variety of\ntasks, e.g., question answering, fact verification, and interactive decision making tasks, such as\nwebpage navigation. Copra is an agent-based approach for formal theorem proving [34]. Two recent\nsurveys give a comprehensive overview of such “augmented LLMs” [21] and LLM agents [36]. Our\nevaluation compares to a general purpose LLM-based agent, AutoGPT, showing that Execution-\nAgent outperforms it in the task of setting up and running test suites of software projects.\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 21 页 ---\nISSTA047:20\nIslem Bouzenia and Michael Pradel\nBenchmarks that rely on test suite executions. Beyond helping developers, the ability to execute\ntest suites is also essential for researchers. In particular, several popular benchmarks rely on test\nsuite executions, such as Defects4J [16], BugsInPy [39], SWE-bench [14], and DyPyBench [4].\nSuch benchmarks are used for various purposes, e.g., to evaluate fault localization, automated\nprogram repair, and dynamic analyses. ExecutionAgent could help to automate the creation of such\nbenchmarks, by reducing the manual effort required to set up and run test suites.\nAutomated pipelines for test suite execution. Several research projects explore automated pipelines\nto execute test suites at a larger scale, either to create benchmarks , e.g., in BugSwarm [35] and\nGitBug-Java [31], or as part of an empirical study [12]. These approaches each target one program-\nming language, e.g., Java [31, 35] and Python [12], and sometimes rely on projects using a specific\nCI/CD platform, e.g., TravisCI [35]. Our evaluation empirically compares against language-specific\nbaselines, showing that ExecutionAgent is more effective while supporting multiple languages.\n6",
+      "start_line": 1543,
+      "end_line": 1596
+    },
+    {
+      "section_id": "sec_8",
+      "title": "Conclusion",
+      "level": 1,
+      "section_type": "conclusion",
+      "content": "In this paper, we introduced ExecutionAgent, an automated technique designed to address the\ncomplexities of test suite execution across diverse software projects. By leveraging a large language\nmodel-based agent, ExecutionAgent autonomously builds an arbitrary project and runs its tests,\nproducing tailored scripts to streamline future test executions. Our approach is modeled after the\ndecision-making processes of a human developer, using meta-prompting and iterative refinement\nto adapt to project-specific dependencies and configurations. An evaluation on 50 open-source\nprojects using 14 languages demonstrates that ExecutionAgent successfully executes most test\nsuites and closely matches ground truth results, with clear improvements over existing methods.\nWith reasonable computational and financial costs, ExecutionAgent holds strong potential as a\nuseful technique for developers, autonomous coding systems, and researchers needing reliable test\nexecution capabilities across varied software ecosystems.\n7\nData Availability\nExecutionAgent is publicly available at https://github.com/sola-st/ExecutionAgent/ and https:\n//doi.org/10.5281/zenodo.15202434.\n8\nAcknowledgments\nThis work was supported by the European Research Council (ERC, grant agreements 851895 and\n101155832) and by the German Research Foundation within the DeMoCo and QPTest projects.\nReferences\n[1] Nadia Alshahwan, Jubin Chheda, Anastasia Finegenova, Beliz Gokkaya, Mark Harman, Inna Harper, Alexandru\nMarginean, Shubho Sengupta, and Eddy Wang. 2024. Automated Unit Test Improvement using Large Language Models\nat Meta. In FSE, Vol. abs/2402.09171. https://doi.org/10.48550/ARXIV.2402.09171 arXiv:2402.09171\n[2] Ramakrishna Bairi, Atharv Sonwane, Aditya Kanade, Vageesh D C, Arun Iyer, Suresh Parthasarathy, Sriram Rajamani, B.\nAshok, and Shashank Shet. 2023. CodePlan: Repository-level Coding using LLMs and Planning. arXiv:cs.SE/2309.12499\n[3] Islem Bouzenia, Premkumar Devanbu, and Michael Pradel. 2024. RepairAgent: An Autonomous, LLM-Based Agent for\nProgram Repair. Preprint. arXiv:cs.SE/2403.17134\n[4] Islem Bouzenia, Bajaj Piyush Krishan, and Michael Pradel. 2024. DyPyBench: A Benchmark of Executable Python\nSoftware. In ACM International Conference on the Foundations of Software Engineering (FSE).\n[5] Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde de Oliveira Pinto, Jared Kaplan, Harrison\nEdwards, Yuri Burda, Nicholas Joseph, Greg Brockman, Alex Ray, Raul Puri, Gretchen Krueger, Michael Petrov,\nHeidy Khlaaf, Girish Sastry, Pamela Mishkin, Brooke Chan, Scott Gray, Nick Ryder, Mikhail Pavlov, Alethea Power,\nLukasz Kaiser, Mohammad Bavarian, Clemens Winter, Philippe Tillet, Felipe Petroski Such, Dave Cummings, Matthias\nPlappert, Fotios Chantzis, Elizabeth Barnes, Ariel Herbert-Voss, William Hebgen Guss, Alex Nichol, Alex Paino, Nikolas\nTezak, Jie Tang, Igor Babuschkin, Suchir Balaji, Shantanu Jain, William Saunders, Christopher Hesse, Andrew N.\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 22 页 ---\nYou Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary Projects\nISSTA047:21\nCarr, Jan Leike, Joshua Achiam, Vedant Misra, Evan Morikawa, Alec Radford, Matthew Knight, Miles Brundage, Mira\nMurati, Katie Mayer, Peter Welinder, Bob McGrew, Dario Amodei, Sam McCandlish, Ilya Sutskever, and Wojciech\nZaremba. 2021. Evaluating Large Language Models Trained on Code. CoRR abs/2107.03374 (2021). arXiv:2107.03374\nhttps://arxiv.org/abs/2107.03374\n[6] Malinda Dilhara, Abhiram Bellur, Timofey Bryksin, and Danny Dig. 2024. Unprecedented Code Change Automation:\nThe Fusion of LLMs and Transformation by Example. In FSE. https://doi.org/10.48550/arXiv.2402.07138\n[7] Yangruibo Ding, Zijian Wang, Wasi Uddin Ahmad, Murali Krishna Ramanathan, Ramesh Nallapati, Parminder Bhatia,\nDan Roth, and Bing Xiang. 2022. CoCoMIC: Code Completion By Jointly Modeling In-file and Cross-file Context.\narXiv preprint arXiv:2212.10007 (2022).\n[8] Aryaz Eghbali and Michael Pradel. 2022. DynaPyt: A Dynamic Analysis Framework for Python. In ESEC/FSE ’22:\n30th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering.\nACM.\n[9] Aryaz Eghbali and Michael Pradel. 2024. De-Hallucinator: Iterative Grounding for LLM-Based Code Completion. CoRR\nabs/2401.01701 (2024). https://doi.org/10.48550/ARXIV.2401.01701 arXiv:2401.01701\n[10] Sidong Feng and Chunyang Chen. 2024. Prompting Is All Your Need: Automated Android Bug Replay with Large\nLanguage Models. In ICSE.\n[11] Luyu Gao, Aman Madaan, Shuyan Zhou, Uri Alon, Pengfei Liu, Yiming Yang, Jamie Callan, and Graham Neubig.\n2022. PAL: Program-aided Language Models. CoRR abs/2211.10435 (2022). https://doi.org/10.48550/arXiv.2211.10435\narXiv:2211.10435\n[12] Martin Gruber and Gordon Fraser. 2023. FlaPy: Mining Flaky Python Tests at Scale. In 45th IEEE/ACM International\nConference on Software Engineering: ICSE 2023 Companion Proceedings, Melbourne, Australia, May 14-20, 2023. IEEE,\n127–131. https://doi.org/10.1109/ICSE-COMPANION58688.2023.00039\n[13] Priyanshu Gupta, Avishree Khare, Yasharth Bajpai, Saikat Chakraborty, Sumit Gulwani, Aditya Kanade, Arjun Rad-\nhakrishna, Gustavo Soares, and Ashish Tiwari. 2023. Grace: Language Models Meet Code Edits. In Proceedings of the\n31st ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering,\nESEC/FSE 2023, San Francisco, CA, USA, December 3-9, 2023, Satish Chandra, Kelly Blincoe, and Paolo Tonella (Eds.).\nACM, 1483–1495. https://doi.org/10.1145/3611643.3616253\n[14] Carlos E. Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press, and Karthik Narasimhan. 2023.\nSWE-bench: Can Language Models Resolve Real-World GitHub Issues? arXiv:cs.CL/2310.06770\n[15] Haolin Jin, Linghan Huang, Haipeng Cai, Jun Yan, Bo Li, and Huaming Chen. 2024. From LLMs to LLM-based Agents\nfor Software Engineering: A Survey of Current, Challenges and Future. arXiv preprint arXiv:2408.02479 (2024).\n[16] René Just, Darioush Jalali, and Michael D. Ernst. 2014. Defects4J: a database of existing faults to enable controlled\ntesting studies for Java programs. In ISSTA. 437–440.\n[17] Sungmin Kang, Juyeon Yoon, and Shin Yoo. 2023. Large Language Models are Few-shot Testers: Exploring LLM-based\nGeneral Bug Reproduction. In 45th IEEE/ACM International Conference on Software Engineering, ICSE. 2312–2323.\nhttps://doi.org/10.1109/ICSE48619.2023.00194\n[18] Caroline Lemieux, Jeevana Priya Inala, Shuvendu K Lahiri, and Siddhartha Sen. 2023. CODAMOSA: Escaping Coverage\nPlateaus in Test Generation with Pre-trained Large Language Models. In 45th International Conference on Software\nEngineering, ser. ICSE.\n[19] Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and Lingming Zhang. 2023. Is Your Code Generated by ChatGPT Really\nCorrect? Rigorous Evaluation of Large Language Models for Code Generation. In Advances in Neural Information\nProcessing Systems 36: Annual Conference on Neural Information Processing Systems 2023, NeurIPS 2023, New Orleans,\nLA, USA, December 10 - 16, 2023, Alice Oh, Tristan Naumann, Amir Globerson, Kate Saenko, Moritz Hardt, and\nSergey Levine (Eds.). http://papers.nips.cc/paper_files/paper/2023/hash/43e9d647ccd3e4b7b5baab53f0368686-Abstract-\nConference.html\n[20] Yizhou Liu, Pengfei Gao, Xinchen Wang, Chao Peng, and Zhao Zhang. 2024. MarsCode Agent: AI-native Automated\nBug Fixing. arXiv preprint arXiv:2409.00899 (2024).\n[21] Grégoire Mialon, Roberto Dessì, Maria Lomeli, Christoforos Nalmpantis, Ramakanth Pasunuru, Roberta Raileanu,\nBaptiste Rozière, Timo Schick, Jane Dwivedi-Yu, Asli Celikyilmaz, Edouard Grave, Yann LeCun, and Thomas Scialom.\n2023. Augmented Language Models: a Survey. CoRR abs/2302.07842 (2023). https://doi.org/10.48550/arXiv.2302.07842\narXiv:2302.07842\n[22] Shishir G. Patil, Tianjun Zhang, Xin Wang, and Joseph E. Gonzalez. 2023. Gorilla: Large Language Model Connected\nwith Massive APIs. CoRR abs/2305.15334 (2023). https://doi.org/10.48550/ARXIV.2305.15334 arXiv:2305.15334\n[23] Juan Altmayer Pizzorno and Emery D. Berger. 2024.\nCoverUp: Coverage-Guided LLM-Based Test Generation.\narXiv:cs.SE/2403.16218\n[24] Devjeet Roy, Xuchao Zhang, Rashi Bhave, Chetan Bansal, Pedro Henrique B. Las-Casas, Rodrigo Fonseca, and Saravan\nRajmohan. 2024. Exploring LLM-Based Agents for Root Cause Analysis. In Companion Proceedings of the 32nd ACM\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 23 页 ---\nISSTA047:22\nIslem Bouzenia and Michael Pradel\nInternational Conference on the Foundations of Software Engineering, FSE 2024, Porto de Galinhas, Brazil, July 15-19, 2024,\nMarcelo d’Amorim (Ed.). ACM, 208–219. https://doi.org/10.1145/3663529.3663841\n[25] Abhik Roychoudhury, Corina Pasareanu, Michael Pradel, and Baishakhi Ray. 2025. Agentic AI Software Engineer:\nProgramming with Trust. arXiv preprint arXiv:2502.13767 (2025).\n[26] Baptiste Rozière, Marie-Anne Lachaux, Lowik Chanussot, and Guillaume Lample. 2020. Unsupervised Translation\nof Programming Languages. In Advances in Neural Information Processing Systems 33: Annual Conference on Neural\nInformation Processing Systems 2020, NeurIPS 2020, December 6-12, 2020, virtual, Hugo Larochelle, Marc’Aurelio Ranzato,\nRaia Hadsell, Maria-Florina Balcan, and Hsuan-Tien Lin (Eds.).\nhttps://proceedings.neurips.cc/paper/2020/hash/\ned23fbf18c2cd35f8c7f8de44f85c08d-Abstract.html\n[27] Gabriel Ryan, Siddhartha Jain, Mingyue Shang, Shiqi Wang, Xiaofei Ma, Murali Krishna Ramanathan, and Baishakhi\nRay. 2024. Code-Aware Prompting: A study of Coverage Guided Test Generation in Regression Setting using LLM. In\nFSE.\n[28] Max Schäfer, Sarah Nadi, Aryaz Eghbali, and Frank Tip. 2024. An Empirical Evaluation of Using Large Language\nModels for Automated Unit Test Generation. IEEE Trans. Software Eng. 50, 1 (2024), 85–105. https://doi.org/10.1109/\nTSE.2023.3334955\n[29] Timo Schick, Jane Dwivedi-Yu, Roberto Dessì, Roberta Raileanu, Maria Lomeli, Luke Zettlemoyer, Nicola Cancedda,\nand Thomas Scialom. 2023. Toolformer: Language Models Can Teach Themselves to Use Tools. CoRR abs/2302.04761\n(2023). https://doi.org/10.48550/arXiv.2302.04761 arXiv:2302.04761\n[30] Disha Shrivastava, Hugo Larochelle, and Daniel Tarlow. 2023. Repository-level prompt generation for large language\nmodels of code. In International Conference on Machine Learning. PMLR, 31693–31715.\n[31] André Silva, Nuno Saavedra, and Martin Monperrus. 2024. GitBug-Java: A Reproducible Benchmark of Recent Java\nBugs. In 2024 IEEE/ACM 21st International Conference on Mining Software Repositories (MSR). IEEE, 118–122.\n[32] Claudio Spiess, David Gros, Kunal Suresh Pai, Michael Pradel, Md Rafiqul Islam Rabin, Amin Alipour, Susmit Jha,\nPremkumar Devanbu, and Toufique Ahmed. 2025. Calibration and Correctness of Language Models for Code. In\nInternational Conference on Software Engineering (ICSE).\n[33] Wei Tao, Yucheng Zhou, Wenqiang Zhang, and Yu Cheng. 2024. MAGIS: LLM-Based Multi-Agent Framework for\nGitHub Issue Resolution. arXiv preprint arXiv:2403.17927 (2024).\n[34] Amitayush Thakur, George Tsoukalas, Yeming Wen, Jimmy Xin, and Swarat Chaudhuri. 2024. An In-Context Learning\nAgent for Formal Theorem-Proving. arXiv:cs.LG/2310.04353 https://arxiv.org/abs/2310.04353\n[35] David A Tomassi, Naji Dmeiri, Yichen Wang, Antara Bhowmick, Yen-Chuan Liu, Premkumar T Devanbu, Bogdan\nVasilescu, and Cindy Rubio-González. 2019. Bugswarm: Mining and continuously growing a dataset of reproducible\nfailures and fixes. In 2019 IEEE/ACM 41st International Conference on Software Engineering (ICSE). IEEE, 339–349.\n[36] Lei Wang, Chen Ma, Xueyang Feng, Zeyu Zhang, Hao Yang, Jingsen Zhang, Zhiyuan Chen, Jiakai Tang, Xu Chen, Yankai\nLin, Wayne Xin Zhao, Zhewei Wei, and Ji-Rong Wen. 2023. A Survey on Large Language Model based Autonomous\nAgents. arXiv:cs.AI/2308.11432\n[37] Jiayi Wei, Greg Durrett, and Isil Dillig. 2023. Coeditor: Leveraging Contextual Changes for Multi-round Code Auto-\nediting. arXiv preprint arXiv:2305.18584 (2023).\n[38] Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou, et al. 2022.\nChain-of-thought prompting elicits reasoning in large language models. Advances in neural information processing\nsystems 35 (2022), 24824–24837.\n[39] Ratnadira Widyasari, Sheng Qin Sim, Camellia Lok, Haodi Qi, Jack Phan, Qijin Tay, Constance Tan, Fiona Wee,\nJodie Ethelda Tan, Yuheng Yieh, et al. 2020. Bugsinpy: a database of existing bugs in python programs to enable\ncontrolled testing and debugging studies. In Proceedings of the 28th ACM joint meeting on european software engineering\nconference and symposium on the foundations of software engineering. 1556–1560.\n[40] Chunqiu Steven Xia, Matteo Paltenghi, Jia Le Tian, Michael Pradel, and Lingming Zhang. 2024. Fuzz4All: Universal\nFuzzing with Large Language Models. In Proceedings of the 46th IEEE/ACM International Conference on Software\nEngineering, ICSE 2024, Lisbon, Portugal, April 14-20, 2024. ACM, 126:1–126:13. https://doi.org/10.1145/3597503.3639121\n[41] Hui Yang, Sifu Yue, and Yunzhong He. 2023. Auto-gpt for online decision making: Benchmarks and additional opinions.\narXiv preprint arXiv:2306.02224 (2023).\n[42] John Yang, Carlos E. Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao, Karthik Narasimhan, and Ofir Press.\n2024. SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering. In Advances in Neural\nInformation Processing Systems 38: Annual Conference on Neural Information Processing Systems 2024, NeurIPS 2024,\nVancouver, BC, Canada, December 10 - 15, 2024, Amir Globersons, Lester Mackey, Danielle Belgrave, Angela Fan,\nUlrich Paquet, Jakub M. Tomczak, and Cheng Zhang (Eds.).\nhttp://papers.nips.cc/paper_files/paper/2024/hash/\n5a7c947568c1b1328ccc5230172e1e7c-Abstract-Conference.html\n[43] Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik R. Narasimhan, and Yuan Cao. 2023. ReAct: Syner-\ngizing Reasoning and Acting in Language Models. In The Eleventh International Conference on Learning Representations,\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.\n\n--- 第 24 页 ---\nYou Name It, I Run It: An LLM Agent to Execute Tests of Arbitrary Projects\nISSTA047:23\nICLR 2023, Kigali, Rwanda, May 1-5, 2023. OpenReview.net. https://openreview.net/forum?id=WE_vluYUL-X\n[44] Fengji Zhang, Bei Chen, Yue Zhang, Jin Liu, Daoguang Zan, Yi Mao, Jian-Guang Lou, and Weizhu Chen. 2023.\nRepoCoder: Repository-Level Code Completion Through Iterative Retrieval and Generation. arXiv:cs.CL/2303.12570\n[45] Yuntong Zhang, Haifeng Ruan, Zhiyu Fan, and Abhik Roychoudhury. 2024. AutoCodeRover: Autonomous Program\nImprovement. In ISSTA.\nReceived 2025-02-27; accepted 2025-03-31\nProc. ACM Softw. Eng., Vol. 2, No. ISSTA, Article ISSTA047. Publication date: July 2025.",
+      "start_line": 1597,
+      "end_line": 1771
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "sec_2_claim_1",
+      "text": "ExecutionAgent successfully executes test suites of arbitrary projects with a deviation of only 7.5% from ground truth test results.",
+      "claim_type": "general",
+      "section_id": "sec_2",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_2_claim_2",
+      "text": "ExecutionAgent improves over the best previously available technique by 6.6x.",
+      "claim_type": "general",
+      "section_id": "sec_2",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_2_claim_3",
+      "text": "The approach imposes reasonable costs with an average execution time of 74 minutes and LLM costs of USD 0.16 per project.",
+      "claim_type": "general",
+      "section_id": "sec_2",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_3_claim_1",
+      "text": "Executing the test suite of a software project is a critical step in various activities during software development and software engineering research.",
+      "claim_type": "general",
+      "section_id": "sec_3",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_3_claim_2",
+      "text": "Executing the tests of an arbitrary project is far from straightforward in practice.",
+      "claim_type": "general",
+      "section_id": "sec_3",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_3_claim_3",
+      "text": "Currently, there are three primary methods for executing the tests of a given project, each with notable limitations.",
+      "claim_type": "general",
+      "section_id": "sec_3",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_3_claim_4",
+      "text": "To the best of our knowledge, there is currently no existing work that addresses these challenges.",
+      "claim_type": "general",
+      "section_id": "sec_3",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_3_claim_5",
+      "text": "Given an arbitrary project, how can we automatically build the project and run its test suite?",
+      "claim_type": "general",
+      "section_id": "sec_3",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_4_claim_1",
+      "text": "The approach should be technology-agnostic, i.e., it should support projects written in different programming languages, using different build systems, and using different testing frameworks.",
+      "claim_type": "causal",
+      "section_id": "sec_4",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_4_claim_2",
+      "text": "The approach should be fully automated, i.e., it should not require any manual intervention or additional information beyond the project itself.",
+      "claim_type": "causal",
+      "section_id": "sec_4",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_4_claim_3",
+      "text": "The formulated problem has, to the best of our knowledge, not been addressed by prior work.",
+      "claim_type": "causal",
+      "section_id": "sec_4",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_4_claim_4",
+      "text": "The intuition behind this approach is that the LLM can 'understand' various sources of information, such as project documentation, existing scripts, and the output of tools, and use this understanding to decide on the steps necessary to execute the tests of the given project.",
+      "claim_type": "causal",
+      "section_id": "sec_4",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_6_claim_1",
+      "text": "The preparation phase is important for structured planning and context retrieval, as its removal leads to a notable drop in success rates.",
+      "claim_type": "performance",
+      "section_id": "sec_6",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_6_claim_2",
+      "text": "The feedback phase is crucial for iterative refinement, as its absence further reduces effectiveness.",
+      "claim_type": "performance",
+      "section_id": "sec_6",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_6_claim_3",
+      "text": "Generated guidelines play a crucial role, as without them, the effectiveness drops by 50%.",
+      "claim_type": "performance",
+      "section_id": "sec_6",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_6_claim_4",
+      "text": "Retrieving external information (e.g., CI/CD configurations and via web search) is important, but removing it only drops the success rate by 21% and increases costs by 13%.",
+      "claim_type": "performance",
+      "section_id": "sec_6",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_6_claim_5",
+      "text": "The preparation phase and the feedback phase are both important in ensuring successful project setup and testing.",
+      "claim_type": "performance",
+      "section_id": "sec_6",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_6_claim_6",
+      "text": "ExecutionAgent uses all available tools, and the terminal seems to be indispensible.",
+      "claim_type": "performance",
+      "section_id": "sec_6",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_6_claim_7",
+      "text": "ExecutionAgent utilizes a diverse command set, making a hard-coded selection of commands ineffective.",
+      "claim_type": "performance",
+      "section_id": "sec_6",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_6_claim_8",
+      "text": "The trajectories of many projects, particularly software libraries, include three clearly identifiable phases: Setup, dependency management, and execution of tests.",
+      "claim_type": "performance",
+      "section_id": "sec_6",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_6_claim_9",
+      "text": "Many trajectories involve using Docker to create isolated environments for applications.",
+      "claim_type": "performance",
+      "section_id": "sec_6",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_7_claim_1",
+      "text": "Our work differs from all the above by focusing not directly on code, but on the task of setting up and running test suites of software projects.",
+      "claim_type": "general",
+      "section_id": "sec_7",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_7_claim_2",
+      "text": "To the best of our knowledge, our work is the first to explore the use of LLM-based agents for setting up and running test suites of software projects.",
+      "claim_type": "general",
+      "section_id": "sec_7",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_7_claim_3",
+      "text": "ExecutionAgent outperforms [AutoGPT] in the task of setting up and running test suites of software projects.",
+      "claim_type": "general",
+      "section_id": "sec_7",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_7_claim_4",
+      "text": "ExecutionAgent is more effective [than language-specific baselines] while supporting multiple languages.",
+      "claim_type": "general",
+      "section_id": "sec_7",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_8_claim_1",
+      "text": "ExecutionAgent successfully executes most test suites and closely matches ground truth results, with clear improvements over existing methods.",
+      "claim_type": "contribution",
+      "section_id": "sec_8",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    },
+    {
+      "claim_id": "sec_8_claim_2",
+      "text": "ExecutionAgent holds strong potential as a useful technique for developers, autonomous coding systems, and researchers needing reliable test execution capabilities across varied software ecosystems.",
+      "claim_type": "contribution",
+      "section_id": "sec_8",
+      "evidence_ids": [
+        "sec_2_evidence_1",
+        "sec_2_evidence_2"
+      ]
+    }
+  ],
+  "evidences": [
+    {
+      "evidence_id": "sec_2_evidence_1",
+      "text": "The evaluation applies ExecutionAgent to 50 open-source projects using 14 different programming languages and many different build and testing tools.",
+      "section_id": "sec_2",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_2_evidence_2",
+      "text": "The approach successfully executes the test suites of 33/50 projects.",
+      "section_id": "sec_2",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_2_evidence_3",
+      "text": "The agent uses meta-prompting to gather guidelines on the latest technologies and iteratively refines its process based on feedback.",
+      "section_id": "sec_2",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_3_evidence_1",
+      "text": "For human developers contributing to open-source projects, running the tests before submitting a pull request ensures that their changes do not introduce regressions.",
+      "section_id": "sec_3",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_3_evidence_2",
+      "text": "LLM agents that autonomously edit a project’s code create a huge demand for a feedback mechanism to validate modifications, and executing the test suite provides such a mechanism.",
+      "section_id": "sec_3",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_3_evidence_3",
+      "text": "Researchers depend on running tests, e.g., to evaluate the effectiveness of dynamic analyses or to create benchmarks involving test execution, such as Defects4J, SWE-Bench, and DyPyBench.",
+      "section_id": "sec_3",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_3_evidence_4",
+      "text": "Projects are developed in various programming languages and ecosystems, each with its own set of tools, dependencies, and conventions. Complex dependencies can pose significant challenges.",
+      "section_id": "sec_3",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_3_evidence_5",
+      "text": "Documentation is often incomplete, inconsistent, or entirely missing, forcing developers to infer the necessary steps.",
+      "section_id": "sec_3",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_3_evidence_6",
+      "text": "Projects may have implicit assumptions about the environment, such as operating system specifics or required system configurations, that are not explicitly stated.",
+      "section_id": "sec_3",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_3_evidence_7",
+      "text": "The diversity of testing frameworks further complicates the process, as each framework has a unique setup and execution procedure.",
+      "section_id": "sec_3",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_3_evidence_8",
+      "text": "The first method involves manually following the project’s documentation and resolving any issues through trial-and-error. This approach is time-consuming and does not scale well.",
+      "section_id": "sec_3",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_3_evidence_9",
+      "text": "The second method is to reuse existing CI/CD workflows employed by project maintainers. However, not all projects have such workflows, and even when they exist, their execution often depends on a specific CI/CD platform, which is not fully accessible to the public.",
+      "section_id": "sec_3",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_3_evidence_10",
+      "text": "The third method is to implement an automated, heuristic script designed to cover common cases. Such scripts typically focus on a single programming language and ecosystem, and they lack the flexibility to handle arbitrary projects.",
+      "section_id": "sec_3",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_3_evidence_11",
+      "text": "Flapy works only on Python projects that are available on PyPy, and even within the Python ecosystems fails to successfully run many test suites.",
+      "section_id": "sec_3",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_3_evidence_12",
+      "text": "The pipeline used to create GitBug-Java, starting from 66,042 repositories, eventually managed to execute the tests of only 228 repositories.",
+      "section_id": "sec_3",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_6_evidence_1",
+      "text": "Table 3 presents the results of ablation variants compared to the full approach, showing significantly lower performance for ablated versions.",
+      "section_id": "sec_6",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_6_evidence_2",
+      "text": "Removing the preparation phase leads to 12 successful builds and only 8 test executions.",
+      "section_id": "sec_6",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_6_evidence_3",
+      "text": "The absence of feedback leads to only 5 successful test executions.",
+      "section_id": "sec_6",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_6_evidence_4",
+      "text": "Without guidelines, the effectiveness drops by 50%.",
+      "section_id": "sec_6",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_6_evidence_5",
+      "text": "Removing external retrieval drops the success rate by 21% and increases costs by 13%.",
+      "section_id": "sec_6",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_6_evidence_6",
+      "text": "74.8% of calls made by the approach invoke the tool terminal, while 16.0% and 8.2% invoke write_file and read_file, respectively.",
+      "section_id": "sec_6",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_6_evidence_7",
+      "text": "Commands for exploring directories and files, such as ls, cd, and pwd, sum up to 33%. Installation and build commands account for 21%. Approximately 25% of executed commands fall outside the top 10.",
+      "section_id": "sec_6",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_6_evidence_8",
+      "text": "Qualitative analysis of trajectories shows three recurring phases: Setup, dependencies, testing, with examples from react-native, commons-csv, and pytest.",
+      "section_id": "sec_6",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_6_evidence_9",
+      "text": "Many trajectories involve using Docker to create isolated environments for applications (e.g., docker build, docker run).",
+      "section_id": "sec_6",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_7_evidence_1",
+      "text": "Our evaluation compares to a general purpose LLM-based agent, AutoGPT, showing that ExecutionAgent outperforms it in the task of setting up and running test suites of software projects.",
+      "section_id": "sec_7",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_7_evidence_2",
+      "text": "Our evaluation empirically compares against language-specific baselines, showing that ExecutionAgent is more effective while supporting multiple languages.",
+      "section_id": "sec_7",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    },
+    {
+      "evidence_id": "sec_8_evidence_1",
+      "text": "An evaluation on 50 open-source projects using 14 languages demonstrates that ExecutionAgent successfully executes most test suites and closely matches ground truth results, with clear improvements over existing methods.",
+      "section_id": "sec_8",
+      "related_claim_ids": [
+        "sec_2_claim_1",
+        "sec_2_claim_2"
+      ],
+      "strength": "medium"
+    }
+  ],
+  "experiments": [
+    {
+      "experiment_id": "sec_2_exp_1",
+      "name": "Evaluation of ExecutionAgent on open-source projects",
+      "dataset": "50 open-source projects using 14 different programming languages and various build/testing tools",
+      "metrics": [
+        "Success rate (projects with executed test suites)",
+        "Deviation from ground truth test results",
+        "Execution time",
+        "LLM cost"
+      ],
+      "section_id": "sec_2"
+    },
+    {
+      "experiment_id": "sec_5_exp_1",
+      "name": "ExecutionAgent evaluation",
+      "dataset": "50 open-source projects from GitHub (10 each for Python, Java, C, C++, and JavaScript) selected based on: (i) diversity in programming languages, (ii) availability of ground truth test execution results from CI/CD platforms (GitHub Actions, CircleCI, Jenkins, CirrusCI, project websites), (iii) project maturity and activity (≥100 stars, ≥100 commits, at least one commit within six months prior to data collection)",
+      "metrics": [
+        "successful build rate",
+        "successful testing rate",
+        "script size (number of commands)",
+        "deviation from ground truth test execution results (for passing, failing, and skipped tests)"
+      ],
+      "section_id": "sec_5"
+    },
+    {
+      "experiment_id": "sec_6_exp_1",
+      "name": "Ablation study with four variants of ExecutionAgent",
+      "dataset": "Not specified in the provided text",
+      "metrics": [
+        "Built",
+        "Executed tests",
+        "Deviation < 10%",
+        "Project cost (USD)"
+      ],
+      "section_id": "sec_6"
+    },
+    {
+      "experiment_id": "sec_8_exp_1",
+      "name": "Evaluation of ExecutionAgent",
+      "dataset": "50 open-source projects using 14 languages",
+      "metrics": [
+        "successful test suite execution rate",
+        "match with ground truth results",
+        "comparison with existing methods"
+      ],
+      "section_id": "sec_8"
+    }
+  ],
+  "results": [
+    {
+      "result_id": "sec_2_result_1",
+      "text": "Successfully executes test suites of 33 out of 50 projects",
+      "dataset": "50 open-source projects",
+      "metric": "Success rate",
+      "value": "33/50",
+      "section_id": "sec_2",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_2_result_2",
+      "text": "Matches test results of ground truth with deviation of only 7.5%",
+      "dataset": "50 open-source projects",
+      "metric": "Deviation from ground truth",
+      "value": "7.5%",
+      "section_id": "sec_2",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_2_result_3",
+      "text": "Improves over best previously available technique by 6.6x",
+      "dataset": "Comparison with prior techniques",
+      "metric": "Improvement factor",
+      "value": "6.6x",
+      "section_id": "sec_2",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_2_result_4",
+      "text": "Average execution time per project",
+      "dataset": "50 open-source projects",
+      "metric": "Execution time",
+      "value": "74 minutes",
+      "section_id": "sec_2",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_2_result_5",
+      "text": "Average LLM cost per project",
+      "dataset": "50 open-source projects",
+      "metric": "LLM cost",
+      "value": "USD 0.16",
+      "section_id": "sec_2",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_1",
+      "text": "ExecutionAgent full approach results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Built",
+      "value": "41",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_2",
+      "text": "ExecutionAgent full approach results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Executed tests",
+      "value": "33",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_3",
+      "text": "ExecutionAgent full approach results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Deviation < 10%",
+      "value": "29",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_4",
+      "text": "ExecutionAgent full approach results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Project cost (USD)",
+      "value": "0.16",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_5",
+      "text": "No preparation phase variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Built",
+      "value": "12",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_6",
+      "text": "No preparation phase variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Executed tests",
+      "value": "8",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_7",
+      "text": "No preparation phase variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Deviation < 10%",
+      "value": "7",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_8",
+      "text": "No preparation phase variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Project cost (USD)",
+      "value": "0.19",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_9",
+      "text": "No feedback phase variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Built",
+      "value": "19",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_10",
+      "text": "No feedback phase variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Executed tests",
+      "value": "5",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_11",
+      "text": "No feedback phase variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Deviation < 10%",
+      "value": "5",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_12",
+      "text": "No feedback phase variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Project cost (USD)",
+      "value": "0.02",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_13",
+      "text": "No guidelines variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Built",
+      "value": "26",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_14",
+      "text": "No guidelines variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Executed tests",
+      "value": "15",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_15",
+      "text": "No guidelines variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Deviation < 10%",
+      "value": "15",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_16",
+      "text": "No guidelines variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Project cost (USD)",
+      "value": "0.15",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_17",
+      "text": "No CI/Web retrieval variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Built",
+      "value": "31",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_18",
+      "text": "No CI/Web retrieval variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Executed tests",
+      "value": "24",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_19",
+      "text": "No CI/Web retrieval variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Deviation < 10%",
+      "value": "23",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_6_result_20",
+      "text": "No CI/Web retrieval variant results",
+      "dataset": "Not specified in the provided text",
+      "metric": "Project cost (USD)",
+      "value": "0.18",
+      "section_id": "sec_6",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    },
+    {
+      "result_id": "sec_8_result_1",
+      "text": "ExecutionAgent successfully executes most test suites and closely matches ground truth results",
+      "dataset": "50 open-source projects using 14 languages",
+      "metric": "successful execution and result matching",
+      "value": "most test suites",
+      "section_id": "sec_8",
+      "supports_claim_ids": [
+        "sec_2_claim_1"
+      ]
+    }
+  ],
+  "contributions": [
+    "Presents ExecutionAgent, an automated technique that prepares scripts for building arbitrary projects from source code and running their test cases.",
+    "Introduces an LLM-based agent that autonomously executes commands and interacts with the host system, inspired by how human developers would address the task.",
+    "Provides a valuable tool for developers, automated programming tools, and researchers needing to execute tests across a wide variety of projects.",
+    "This paper presents ExecutionAgent, the first LLM-based agent for autonomously setting up arbitrary projects and executing their test suites.",
+    "We present the novel concept of meta-prompting, which asks a recently trained LLM to automatically generate up-to-date, technology-specific, and programming language-specific guidelines.",
+    "Introduced ExecutionAgent, an automated technique designed to address the complexities of test suite execution across diverse software projects.",
+    "ExecutionAgent autonomously builds an arbitrary project and runs its tests, producing tailored scripts to streamline future test executions.",
+    "Our approach is modeled after the decision-making processes of a human developer, using meta-prompting and iterative refinement to adapt to project-specific dependencies and configurations."
+  ],
+  "limitations": [],
+  "keywords": [],
+  "graph": {
+    "sec_2_claim_1": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_2_claim_2": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_2_claim_3": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_3_claim_1": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_3_claim_2": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_3_claim_3": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_3_claim_4": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_3_claim_5": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_4_claim_1": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_4_claim_2": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_4_claim_3": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_4_claim_4": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_6_claim_1": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_6_claim_2": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_6_claim_3": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_6_claim_4": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_6_claim_5": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_6_claim_6": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_6_claim_7": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_6_claim_8": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_6_claim_9": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_7_claim_1": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_7_claim_2": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_7_claim_3": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_7_claim_4": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_8_claim_1": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_8_claim_2": [
+      "sec_2_evidence_1",
+      "sec_2_evidence_2"
+    ],
+    "sec_2_evidence_1": [
+      "sec_2_result_1"
+    ],
+    "sec_2_evidence_2": [
+      "sec_2_result_2"
+    ],
+    "sec_2_evidence_3": [
+      "sec_2_result_3"
+    ],
+    "sec_3_evidence_1": [
+      "sec_2_result_4"
+    ],
+    "sec_3_evidence_2": [
+      "sec_2_result_5"
+    ],
+    "sec_3_evidence_3": [
+      "sec_6_result_1"
+    ],
+    "sec_3_evidence_4": [
+      "sec_6_result_2"
+    ],
+    "sec_3_evidence_5": [
+      "sec_6_result_3"
+    ],
+    "sec_3_evidence_6": [
+      "sec_6_result_4"
+    ],
+    "sec_3_evidence_7": [
+      "sec_6_result_5"
+    ],
+    "sec_3_evidence_8": [
+      "sec_6_result_6"
+    ],
+    "sec_3_evidence_9": [
+      "sec_6_result_7"
+    ],
+    "sec_3_evidence_10": [
+      "sec_6_result_8"
+    ],
+    "sec_3_evidence_11": [
+      "sec_6_result_9"
+    ],
+    "sec_3_evidence_12": [
+      "sec_6_result_10"
+    ],
+    "sec_6_evidence_1": [
+      "sec_6_result_11"
+    ],
+    "sec_6_evidence_2": [
+      "sec_6_result_12"
+    ],
+    "sec_6_evidence_3": [
+      "sec_6_result_13"
+    ],
+    "sec_6_evidence_4": [
+      "sec_6_result_14"
+    ],
+    "sec_6_evidence_5": [
+      "sec_6_result_15"
+    ],
+    "sec_6_evidence_6": [
+      "sec_6_result_16"
+    ],
+    "sec_6_evidence_7": [
+      "sec_6_result_17"
+    ],
+    "sec_6_evidence_8": [
+      "sec_6_result_18"
+    ],
+    "sec_6_evidence_9": [
+      "sec_6_result_19"
+    ],
+    "sec_7_evidence_1": [
+      "sec_6_result_20"
+    ],
+    "sec_7_evidence_2": [
+      "sec_8_result_1"
+    ],
+    "sec_8_evidence_1": [],
+    "sec_2_result_1": [
+      "sec_2_exp_1"
+    ],
+    "sec_2_result_2": [
+      "sec_2_exp_1"
+    ],
+    "sec_2_result_3": [
+      "sec_2_exp_1"
+    ],
+    "sec_2_result_4": [
+      "sec_2_exp_1"
+    ],
+    "sec_2_result_5": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_1": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_2": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_3": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_4": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_5": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_6": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_7": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_8": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_9": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_10": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_11": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_12": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_13": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_14": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_15": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_16": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_17": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_18": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_19": [
+      "sec_2_exp_1"
+    ],
+    "sec_6_result_20": [
+      "sec_2_exp_1"
+    ],
+    "sec_8_result_1": [
+      "sec_2_exp_1"
+    ]
+  }
+}

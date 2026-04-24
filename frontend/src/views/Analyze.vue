@@ -175,6 +175,7 @@
             </div>
             <div class="markdown-content prose prose-invert max-w-none text-sm" v-html="renderedContent"></div>
           </div>
+
         </div>
       </div>
 
@@ -258,16 +259,17 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { renderMarkdown } from '../utils/markdown'
 import VuePdfEmbed from 'vue-pdf-embed'
 import api from '../api'
 import { store } from '../store'
-import { 
+import {
   FileSearch, FileText, Upload, Loader2, RotateCcw, FileUp,
   BarChart3, Sparkles, Copy, Download, Check, X, Highlighter,
-  MessageCircle, Edit3, Trash2, StickyNote, FileDown
+  MessageCircle, Edit3, Trash2, StickyNote, FileDown, Layers3,
+  GitMerge, FlaskConical, BadgePercent
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -282,6 +284,65 @@ const resultPanelRef = ref(null)
 const streamingContent = ref('')
 const progressPercent = ref(0)
 const progressMessage = ref('准备分析...')
+const profileLoading = ref(false)
+const profileDetail = ref(null)
+
+const statCards = computed(() => {
+  const counts = profileDetail.value?.counts || {}
+  return [
+    { label: 'Sections', value: counts.sections || 0 },
+    { label: 'Claims', value: counts.claims || 0 },
+    { label: 'Evidence', value: counts.evidences || 0 },
+    { label: 'Experiments', value: counts.experiments || 0 },
+    { label: 'Results', value: counts.results || 0 },
+  ]
+})
+
+const linkedClaims = computed(() => {
+  if (!profileDetail.value) return []
+  const evidences = profileDetail.value.evidences || []
+  return (profileDetail.value.claims || []).map(claim => ({
+    ...claim,
+    evidenceList: evidences.filter(evidence =>
+      (claim.evidence_ids || []).includes(evidence.evidence_id) ||
+      (evidence.related_claim_ids || []).includes(claim.claim_id)
+    ),
+  }))
+})
+
+const truncate = (text, max = 180) => {
+  if (!text) return '暂无内容摘要。'
+  return text.length > max ? `${text.slice(0, max)}...` : text
+}
+
+const formatSectionType = (type) => ({
+  abstract: 'Abstract', introduction: 'Introduction', related_work: 'Related Work',
+  method: 'Method', experiment: 'Experiment', result: 'Result', ablation: 'Ablation',
+  conclusion: 'Conclusion', limitation: 'Limitation', appendix: 'Appendix', other: 'Other',
+}[type] || type || 'Other')
+
+const formatClaimType = (type) => ({
+  contribution: 'Contribution', performance: 'Performance', comparison: 'Comparison',
+  causal: 'Causal', limitation: 'Limitation', general: 'General',
+}[type] || type || 'General')
+
+const formatStrength = (strength) => ({ strong: '强', medium: '中', weak: '弱' }[strength] || strength || '中')
+
+const loadProfileDetail = async () => {
+  if (!store.documentInfo?.document_id) {
+    profileDetail.value = null
+    return
+  }
+  profileLoading.value = true
+  try {
+    profileDetail.value = await api.getDocumentProfileDetail()
+  } catch (e) {
+    profileDetail.value = null
+    console.warn('加载 profile detail 失败:', e.message)
+  } finally {
+    profileLoading.value = false
+  }
+}
 
 // 标注相关
 const showAnnotations = ref(false)
@@ -316,9 +377,10 @@ const saveAnnotationsToStorage = () => {
 }
 
 // 监听文档切换，重新加载标注
-watch(() => store.documentInfo, () => {
+watch(() => store.documentInfo?.document_id, async () => {
   annotations.value = []
   loadAnnotations()
+  await loadProfileDetail()
 }, { immediate: true })
 
 // PDF 文字选中
@@ -470,6 +532,7 @@ const uploadOnly = async (uploadFile) => {
   isAnalyzing.value = false
   streamingContent.value = ''
   uploadStatus.value = '正在解析文档...'
+  profileDetail.value = null
   
   try {
     const result = await api.uploadDocument(uploadFile)
@@ -477,6 +540,7 @@ const uploadOnly = async (uploadFile) => {
     const docInfo = result.document_info
     if (store.pdfUrl?.startsWith('blob:')) URL.revokeObjectURL(store.pdfUrl)
     store.setDocument(docInfo, docInfo.file_url, null)
+    await loadProfileDetail()
   } catch (e) {
     alert('上传失败: ' + e.message)
   } finally {
@@ -509,6 +573,7 @@ const startAnalysis = async () => {
           analysis: event.analysis,
         })
         streamingContent.value = ''
+        await loadProfileDetail()
       } else if (stage === 'error') {
         throw new Error(event.message)
       }
@@ -528,6 +593,7 @@ const resetUpload = async () => {
   file.value = null
   streamingContent.value = ''
   isAnalyzing.value = false
+  profileDetail.value = null
   // 只清除当前文档的视图状态，保留所有已加载文档（后端+前端）
   store.documentInfo = null
   store.pdfUrl = null

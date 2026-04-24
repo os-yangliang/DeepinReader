@@ -1,5 +1,5 @@
 """
-问答 Agent - 基于 RAG 的论文问答 (支持 Plan-and-Solve)
+问答 Agent - 基于结构化解析和 Claim-Evidence 的论文问答
 """
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
@@ -7,366 +7,293 @@ import time
 import logging
 import json
 
-from langchain_core.documents import Document
-from langchain_core.prompts import PromptTemplate
-
 from services.llm_service import LLMService
 from services.vector_store import VectorStoreService
 from services.tools import tool_service
-from prompts.templates import (
-    QA_PROMPT, 
-    CHAT_SYSTEM_PROMPT, 
-    PLANNER_PROMPT, 
-    SOLVER_PROMPT
+from services.paper_schema import (
+    PaperProfile,
+    EvidenceBundle,
+    QuestionRoute,
 )
+from services.subgraph_retriever import SubgraphRetriever
+from services.object_indexer import ObjectIndexer
+from prompts.templates import CLAIM_EVIDENCE_ANSWER_PROMPT
+from agents.question_router_agent import QuestionRouterAgent
+from agents.verifier_agent import VerifierAgent
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class QAResult:
-    """问答结果"""
     success: bool
     answer: str = ""
     source_chunks: List[str] = None
+    route_type: str = "general"
+    evidence_summary: List[str] = None
+    warnings: List[str] = None
+    reasoning_trace: List[str] = None
+    reasoning_paths: List[List[str]] = None
+    claim_nodes: List[str] = None
+    evidence_nodes: List[str] = None
+    result_nodes: List[str] = None
+    confidence: float = 0.0
     error_message: str = ""
     processing_time: float = 0.0
-    
+
     def __post_init__(self):
         if self.source_chunks is None:
             self.source_chunks = []
+        if self.evidence_summary is None:
+            self.evidence_summary = []
+        if self.warnings is None:
+            self.warnings = []
+        if self.reasoning_trace is None:
+            self.reasoning_trace = []
+        if self.reasoning_paths is None:
+            self.reasoning_paths = []
+        if self.claim_nodes is None:
+            self.claim_nodes = []
+        if self.evidence_nodes is None:
+            self.evidence_nodes = []
+        if self.result_nodes is None:
+            self.result_nodes = []
 
 
 class QAAgent:
-    """问答 Agent - 基于 Plan-and-Solve 架构"""
-    
     def __init__(
         self,
         llm_service: Optional[LLMService] = None,
-        vector_store: Optional[VectorStoreService] = None
+        vector_store: Optional[VectorStoreService] = None,
     ):
         self.llm_service = llm_service or LLMService()
         self.vector_store = vector_store or VectorStoreService()
-        
-        # 聊天历史
         self.chat_history: List[Dict[str, str]] = []
-        
-        # 当前文档信息
         self.current_doc_id: Optional[str] = None
         self.current_paper_title: str = ""
         self.current_paper_summary: str = ""
+        self.current_profile: Optional[PaperProfile] = None
         self._cached_suggestions: Optional[List[str]] = None
-    
+        self.object_indexer = ObjectIndexer(self.vector_store)
+        self.subgraph_retriever = SubgraphRetriever()
+        self.router = QuestionRouterAgent(self.llm_service)
+        self.verifier = VerifierAgent(self.llm_service)
+
     def set_document_context(
         self,
         doc_id: str,
         paper_title: str = "",
-        paper_summary: str = ""
+        paper_summary: str = "",
     ) -> bool:
-        """
-        设置当前文档上下文
-        """
         try:
-            # 短路：如果已经是同一个文档，更新元信息即可，不重新加载集合
-            if self.current_doc_id == doc_id:
-                self.current_paper_title = paper_title
-                self.current_paper_summary = paper_summary
-                return True
-
-            # 加载向量集合（内部已有短路缓存）
             success = self.vector_store.load_collection(doc_id)
             if success:
                 self.current_doc_id = doc_id
                 self.current_paper_title = paper_title
                 self.current_paper_summary = paper_summary
+                self.current_profile = self.object_indexer.load_profile(doc_id)
                 self.chat_history = []
-                self._cached_suggestions = None  # 清除建议问题缓存
+                self._cached_suggestions = None
                 return True
             return False
         except Exception:
             return False
-    
-    def _plan(self, question: str) -> List[Dict[str, str]]:
-        """
-        [Planner] 规划求解步骤
-        """
-        prompt = PLANNER_PROMPT.format(question=question)
-        
-        # 调用 LLM 生成计划
-        # 这里不使用 history，因为 planning 是一个独立的推理过程
-        plan_text = self.llm_service.chat_sync(user_message=prompt, chat_history=[])
-        
-        steps = []
-        for line in plan_text.split('\n'):
-            line = line.strip()
-            if not line.startswith("Step"):
-                continue
-                
-            # 解析: Step 1: [Search Paper] xxx
-            try:
-                parts = line.split(':', 1)
-                if len(parts) < 2: continue
-                
-                content = parts[1].strip()
-                if "[Search Paper]" in content:
-                    query = content.replace("[Search Paper]", "").strip()
-                    steps.append({"tool": "paper", "query": query})
-                elif "[Search Web]" in content:
-                    query = content.replace("[Search Web]", "").strip()
-                    steps.append({"tool": "web", "query": query})
-            except Exception as e:
-                logger.warning(f"解析计划步骤失败: {line}, error: {e}")
-                
-        # 如果没有生成有效计划（可能是简单问题），返回默认单步计划
-        if not steps:
-            steps.append({"tool": "paper", "query": question})
-            
-        return steps
 
-    def _execute(self, steps: List[Dict[str, str]]) -> str:
-        """
-        [Executor] 执行步骤并收集证据
-        """
-        evidence = []
-        
-        for i, step in enumerate(steps, 1):
-            tool = step["tool"]
-            query = step["query"]
-            
-            result_text = ""
-            if tool == "paper":
-                # 使用 Hybrid Search (用 get_relevant_documents 避免参数冲突)
-                retriever = self.vector_store.get_retriever(k=3)
-                try:
-                    # 优先使用兼容性更好的方法
-                    if hasattr(retriever, 'get_relevant_documents'):
-                        docs = retriever.get_relevant_documents(query)
-                    else:
-                        docs = retriever.invoke(query)
-                except Exception as e:
-                    logger.warning(f"Retriever error: {e}")
-                    docs = []
-                result_text = "\n".join([f"- {doc.page_content}" for doc in docs]) if docs else "(未找到相关内容)"
-                source = "论文检索"
-            elif tool == "web":
-                result_text = tool_service.web_search(query)
-                source = "网络搜索"
-            
-            evidence.append(f"### 信息来源 {i} ({source}): {query}\n{result_text}\n")
-            
-        return "\n".join(evidence)
-
-    def _solve(self, question: str, evidence: str, use_history: bool = True) -> str:
-        """
-        [Solver] 综合回答
-        """
-        full_prompt = SOLVER_PROMPT.format(question=question, evidence=evidence)
-        
-        # 准备历史记录
-        history = self.chat_history if use_history else None
-        
-        # 调用 LLM 生成最终回答
-        answer = self.llm_service.chat_sync(
-            user_message=full_prompt,
-            system_prompt=self._build_system_prompt(), # 保持人设
-            chat_history=history
+    def _build_system_prompt(self) -> str:
+        return (
+            "你是一位专业的学术论文研究助手。"
+            f"当前论文标题：{self.current_paper_title or '未知标题'}\n"
+            f"论文摘要概述：{self.current_paper_summary[:500]}"
         )
-        return answer
 
-    def ask(
-        self,
-        question: str,
-        top_k: int = 5,
-        use_history: bool = True
-    ) -> QAResult:
-        """
-        Plan-and-Solve 模式回答问题
-        """
+    def _build_plan(self, route_type: QuestionRoute, question: str) -> List[str]:
+        if route_type == QuestionRoute.STRUCTURE:
+            return ["定位章节结构", "整理章节摘要"]
+        if route_type == QuestionRoute.METHOD:
+            return ["检索方法章节", "定位关键主张", "生成方法解释"]
+        if route_type == QuestionRoute.EVIDENCE:
+            return ["定位主张", "检索证据与结果", "验证回答是否有支撑"]
+        if route_type == QuestionRoute.RESULT:
+            return ["检索实验结果", "聚合指标和数据集信息"]
+        if route_type == QuestionRoute.CRITICAL:
+            return ["定位主张", "查找证据与局限", "给出批判性结论"]
+        return ["检索相关章节", "提取证据", "生成回答"]
+
+    def _retrieve_bundle(self, question: str, route_type: QuestionRoute) -> EvidenceBundle:
+        bundle = EvidenceBundle(route=route_type)
+        profile = self.current_profile
+
+        if profile:
+            if route_type == QuestionRoute.STRUCTURE:
+                bundle.sections = profile.sections[:6]
+            elif route_type == QuestionRoute.METHOD:
+                bundle.sections = [s for s in profile.sections if s.section_type.value in {"method", "introduction"}][:4]
+                bundle.target_claims = [c for c in profile.claims if c.claim_type.value in {"causal", "general"}][:4]
+            elif route_type == QuestionRoute.EVIDENCE:
+                bundle.target_claims = profile.claims[:4]
+                bundle.evidences = profile.evidences[:6]
+                bundle.results = profile.results[:4]
+            elif route_type == QuestionRoute.RESULT:
+                bundle.results = profile.results[:6]
+                bundle.sections = [s for s in profile.sections if s.section_type.value in {"experiment", "result", "ablation"}][:3]
+            elif route_type == QuestionRoute.CRITICAL:
+                bundle.target_claims = profile.claims[:3]
+                bundle.evidences = profile.evidences[:4]
+                bundle.missing_information.extend(profile.limitations[:3])
+                bundle.sections = [s for s in profile.sections if s.section_type.value in {"conclusion", "limitation"}][:2]
+            else:
+                bundle.sections = profile.sections[:3]
+                bundle.target_claims = profile.claims[:3]
+                bundle.evidences = profile.evidences[:3]
+
+        docs = self.vector_store.search(question, top_k=6)
+        for doc in docs:
+            meta = doc.metadata or {}
+            object_type = meta.get("object_type", "chunk")
+            if object_type == "claim" and profile:
+                matched = next((c for c in profile.claims if c.claim_id == meta.get("claim_id")), None)
+                if matched and all(c.claim_id != matched.claim_id for c in bundle.target_claims):
+                    bundle.target_claims.append(matched)
+            elif object_type == "evidence" and profile:
+                matched = next((e for e in profile.evidences if e.evidence_id == meta.get("evidence_id")), None)
+                if matched and all(e.evidence_id != matched.evidence_id for e in bundle.evidences):
+                    bundle.evidences.append(matched)
+            elif object_type == "result" and profile:
+                matched = next((r for r in profile.results if r.result_id == meta.get("result_id")), None)
+                if matched and all(r.result_id != matched.result_id for r in bundle.results):
+                    bundle.results.append(matched)
+            elif object_type == "section" and profile:
+                matched = next((s for s in profile.sections if s.section_id == meta.get("section_id")), None)
+                if matched and all(s.section_id != matched.section_id for s in bundle.sections):
+                    bundle.sections.append(matched)
+            bundle.source_chunks.append(doc.page_content[:500])
+
+        if not bundle.source_chunks:
+            bundle.missing_information.append("未检索到足够相关的论文片段")
+        return bundle
+
+    def _bundle_to_text(self, bundle: EvidenceBundle) -> str:
+        data = {
+            "route": bundle.route.value,
+            "claims": [c.text for c in bundle.target_claims[:5]],
+            "evidences": [e.text for e in bundle.evidences[:5]],
+            "results": [r.text for r in bundle.results[:5]],
+            "sections": [f"{s.title}: {s.content[:300]}" for s in bundle.sections[:4]],
+            "missing_information": bundle.missing_information[:3],
+        }
+        return json.dumps(data, ensure_ascii=False, indent=2)
+
+    def _solve(self, question: str, bundle: EvidenceBundle, use_history: bool = True) -> str:
+        prompt = CLAIM_EVIDENCE_ANSWER_PROMPT.format(
+            question=question,
+            route_type=bundle.route.value,
+            evidence_bundle=self._bundle_to_text(bundle),
+        )
+        history = self.chat_history if use_history else None
+        return self.llm_service.chat_sync(
+            user_message=prompt,
+            system_prompt=self._build_system_prompt(),
+            chat_history=history,
+        )
+
+    def ask(self, question: str, top_k: int = 5, use_history: bool = True) -> QAResult:
         start_time = time.time()
-        
         if self.current_doc_id is None:
             return QAResult(success=False, error_message="请先上传并解析论文文档")
-        
+
         try:
-            # 1. Plan
-            steps = self._plan(question)
-            logger.info(f"Generated Plan: {steps}")
-            
-            # 2. Execute
-            evidence = self._execute(steps)
-            
-            # 3. Solve
-            answer = self._solve(question, evidence, use_history)
-            
-            # 更新历史
+            decision = self.router.route(question)
+            trace = [f"route={decision.route.value}", f"targets={','.join(decision.retrieval_targets)}"]
+            trace.extend(self._build_plan(decision.route, question))
+            bundle = self._retrieve_bundle(question, decision.route)
+            subgraph = self.subgraph_retriever.retrieve(self.current_profile, decision.route) if self.current_profile else {"paths": [], "visited_ids": []}
+            if self.current_profile:
+                bundle = self.subgraph_retriever.enrich_bundle(bundle, self.current_profile, subgraph)
+            answer = self._solve(question, bundle, use_history)
+            verification = self.verifier.verify(question, answer, bundle, subgraph.get("paths", []))
+
             if use_history:
                 self.chat_history.append({"role": "user", "content": question})
                 self.chat_history.append({"role": "assistant", "content": answer})
                 if len(self.chat_history) > 20:
                     self.chat_history = self.chat_history[-20:]
-            
-            # 简单的来源追踪 (取第一步检索的片段，如果有的话)
-            source_chunks = []
-            if steps and steps[0]["tool"] == "paper":
-                 # 这里简单模拟，实际上 evidence 已经包含了文本
-                 source_chunks = [evidence[:200] + "..."]
+
+            evidence_summary = [e.text for e in bundle.evidences[:3]] or [r.text for r in bundle.results[:3]]
+            if not evidence_summary:
+                evidence_summary = [s.title for s in bundle.sections[:3]]
+            path_strings = ["path=" + " ".join(path) for path in subgraph.get("paths", [])[:3]]
+            claim_nodes = [claim.claim_id for claim in bundle.target_claims[:4]]
+            evidence_nodes = [evidence.evidence_id for evidence in bundle.evidences[:4]]
+            result_nodes = [result.result_id for result in bundle.results[:4]]
 
             return QAResult(
                 success=True,
                 answer=answer,
-                source_chunks=source_chunks,
-                processing_time=time.time() - start_time
+                source_chunks=bundle.source_chunks[:5],
+                route_type=decision.route.value,
+                evidence_summary=evidence_summary,
+                warnings=verification.warnings,
+                reasoning_trace=trace + path_strings,
+                reasoning_paths=subgraph.get("paths", [])[:5],
+                claim_nodes=claim_nodes,
+                evidence_nodes=evidence_nodes,
+                result_nodes=result_nodes,
+                confidence=verification.confidence,
+                processing_time=time.time() - start_time,
             )
-            
         except Exception as e:
-            logger.exception("Plan-and-Solve failed")
+            logger.exception("Claim-Evidence QA failed")
             return QAResult(
                 success=False,
                 error_message=str(e),
-                processing_time=time.time() - start_time
+                processing_time=time.time() - start_time,
             )
-            
-    # ask_async 和 ask_stream 的逻辑类似，这里为了保持一致性暂时简化
-    # 真正的流式 Plan-and-Solve 比较复杂（需要流式输出“正在规划...”、“正在搜索...”等状态）
-    # 这里我们简单实现 ask_stream，暂不展示中间步骤，只流式输出最终结果
-    
+
     def ask_stream(self, question: str, top_k: int = 5):
         if self.current_doc_id is None:
             yield "请先上传并解析论文文档"
             return
-
         try:
-            # 为了用户体验，先输出一些思考过程
-            yield "正在分析问题并制定检索计划...\n"
-            steps = self._plan(question)
-            
-            # 收集引用来源
-            source_docs = []
-            
-            for step in steps:
-                tool_name = "论文" if step["tool"] == "paper" else "网络"
-                yield f"> 正在检索{tool_name}: {step['query']}...\n"
-            
-            # Execute 并收集源文档
-            evidence_parts = []
-            for i, step in enumerate(steps, 1):
-                tool = step["tool"]
-                query = step["query"]
-                
-                if tool == "paper":
-                    retriever = self.vector_store.get_retriever(k=3)
-                    try:
-                        if hasattr(retriever, 'get_relevant_documents'):
-                            docs = retriever.get_relevant_documents(query)
-                        else:
-                            docs = retriever.invoke(query)
-                    except Exception as e:
-                        logger.warning(f"Retriever error: {e}")
-                        docs = []
-                    
-                    for j, doc in enumerate(docs):
-                        meta = doc.metadata or {}
-                        page = meta.get("page", meta.get("page_number", "?"))
-                        source_docs.append({
-                            "text": doc.page_content[:200].strip(),
-                            "page": page,
-                            "section": meta.get("section", ""),
-                        })
-                    
-                    result_text = "\n".join([f"- {doc.page_content}" for doc in docs]) if docs else "(未找到相关内容)"
-                    evidence_parts.append(f"### 信息来源 {i} (论文检索): {query}\n{result_text}\n")
-                elif tool == "web":
-                    result_text = tool_service.web_search(query)
-                    evidence_parts.append(f"### 信息来源 {i} (网络搜索): {query}\n{result_text}\n")
-            
-            evidence = "\n".join(evidence_parts)
-            
-            yield "> 正在综合信息生成回答...\n\n"
-            
-            # Solve Stream
-            full_prompt = SOLVER_PROMPT.format(question=question, evidence=evidence)
-            full_answer = ""
-            for chunk in self.llm_service.stream_chat(
-                user_message=full_prompt,
-                system_prompt=self._build_system_prompt(),
-                chat_history=self.chat_history
-            ):
-                full_answer += chunk
+            yield "正在识别问题类型...\n"
+            decision = self.router.route(question)
+            yield f"> 问题类型: {decision.route.value}\n"
+            yield "> 正在检索关键主张与证据...\n"
+            bundle = self._retrieve_bundle(question, decision.route)
+            subgraph = self.subgraph_retriever.retrieve(self.current_profile, decision.route) if self.current_profile else {"paths": [], "visited_ids": []}
+            if self.current_profile:
+                bundle = self.subgraph_retriever.enrich_bundle(bundle, self.current_profile, subgraph)
+            if subgraph.get("paths"):
+                yield "> 已定位论证路径...\n"
+                for path in subgraph.get("paths", [])[:2]:
+                    yield f"> path: {' '.join(path)}\n"
+            yield "> 正在综合证据生成回答...\n"
+            answer = self._solve(question, bundle, use_history=True)
+            for chunk in self._stream_text(answer):
                 yield chunk
-                
+            yield "\n> 正在验证答案可靠性...\n"
+            verification = self.verifier.verify(question, answer, bundle, subgraph.get("paths", []))
+            if verification.warnings:
+                yield "\n风险提示：\n"
+                for warning in verification.warnings:
+                    yield f"- {warning}\n"
             self.chat_history.append({"role": "user", "content": question})
-            self.chat_history.append({"role": "assistant", "content": full_answer})
+            self.chat_history.append({"role": "assistant", "content": answer})
             if len(self.chat_history) > 20:
                 self.chat_history = self.chat_history[-20:]
-            
-            # 去重并输出引用来源
-            seen = set()
-            unique_sources = []
-            for s in source_docs:
-                key = s["text"][:80]
-                if key not in seen:
-                    seen.add(key)
-                    unique_sources.append(s)
-            
-            if unique_sources:
-                yield "\n__SOURCES__" + json.dumps(unique_sources[:5], ensure_ascii=False)
-                
         except Exception as e:
-            yield f"回答出错: {str(e)}"
+            yield f"问答失败: {str(e)}"
 
-    def _build_context(self, documents: List[Document]) -> str:
-        """(Legacy) 构建上下文"""
-        context_parts = []
-        for i, doc in enumerate(documents, 1):
-            context_parts.append(f"[片段 {i}]\n{doc.page_content}")
-        return "\n\n".join(context_parts)
-    
-    def _build_system_prompt(self) -> str:
-        """构建系统提示"""
-        return CHAT_SYSTEM_PROMPT.format(
-            paper_title=self.current_paper_title or "未知标题",
-            paper_summary=self.current_paper_summary[:1000] if self.current_paper_summary else "暂无摘要"
-        )
-    
-    def clear_history(self) -> None:
+    def _stream_text(self, text: str, chunk_size: int = 80):
+        for i in range(0, len(text), chunk_size):
+            yield text[i:i + chunk_size]
+
+    def clear_history(self):
         self.chat_history = []
-    
-    def get_chat_history(self) -> List[Dict[str, str]]:
-        return self.chat_history.copy()
-    
+
     def get_suggested_questions(self) -> List[str]:
-        """根据论文内容动态生成建议问题（带缓存）"""
-        # 如果有缓存，直接返回
-        if hasattr(self, '_cached_suggestions') and self._cached_suggestions:
-            return self._cached_suggestions
-
-        default_questions = [
-            "这篇论文的主要研究问题是什么？",
-            "论文使用了什么方法来解决问题？",
-            "实验结果如何？有什么重要发现？",
-            "这篇论文的创新点是什么？",
-            "论文有什么局限性或不足？",
-            "作者提出了哪些未来研究方向？",
+        return [
+            "这篇论文的核心方法是什么？",
+            "作者是如何证明方法有效的？",
+            "有哪些关键实验结果支持论文结论？",
+            "这篇论文的局限性是什么？",
         ]
-        
-        # 如果有论文摘要，使用 LLM 生成个性化建议问题
-        if self.current_paper_summary and len(self.current_paper_summary) > 100:
-            try:
-                prompt = f"""根据以下论文摘要，生成 6 个对读者最有价值的具体问题。
-问题应当具体、有针对性，而不是泛泛而谈。每行一个问题，不要编号。
-
-论文标题: {self.current_paper_title or "未知"}
-论文摘要:
-{self.current_paper_summary[:1500]}
-
-请直接输出 6 个问题，每行一个："""
-                
-                result = self.llm_service.generate_with_prompt(prompt, {})
-                if result:
-                    questions = [q.strip().lstrip("0123456789.、）) ") for q in result.strip().split("\n") if q.strip()]
-                    if len(questions) >= 3:
-                        self._cached_suggestions = questions[:6]
-                        return self._cached_suggestions
-            except Exception as e:
-                logger.warning(f"动态生成建议问题失败，使用默认问题: {e}")
-        
-        return default_questions

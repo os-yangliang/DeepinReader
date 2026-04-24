@@ -2,6 +2,77 @@
 Prompt 模板定义
 """
 
+# 结构化章节分类 Prompt
+SECTION_CLASSIFICATION_PROMPT = """你是学术论文结构解析器。请根据给定章节标题，判断其章节类型。
+
+标题：{section_title}
+
+可选类型：abstract, introduction, related_work, method, experiment, result, ablation, conclusion, limitation, appendix, other
+
+只输出一个类型字符串。"""
+
+# 学术对象抽取 Prompt
+SCHOLARLY_OBJECT_EXTRACTION_PROMPT = """你是学术论文结构化信息抽取器。请从以下章节中抽取论文研究对象。
+
+章节标题：{section_title}
+章节类型：{section_type}
+章节内容：
+{section_content}
+
+请输出 JSON，格式如下：
+{{
+  "claims": ["..."],
+  "evidences": ["..."],
+  "experiments": [{{"name": "...", "dataset": "...", "metrics": ["..."]}}],
+  "results": [{{"text": "...", "dataset": "...", "metric": "...", "value": "..."}}],
+  "contributions": ["..."],
+  "limitations": ["..."]
+}}
+
+要求：
+1. 只输出合法 JSON
+2. 没有内容时返回空数组
+3. claim 应是论文作者明确提出的结论、主张或因果解释
+4. evidence 应是实验、对比、消融、定性案例等支持性内容"""
+
+# 问题路由 Prompt
+QUESTION_ROUTING_PROMPT = """你是论文问答路由器。请判断用户问题属于以下哪一类：
+structure, method, evidence, result, critical, general。
+
+问题：{question}
+
+只输出类别名称。"""
+
+# Claim-Evidence 回答 Prompt
+CLAIM_EVIDENCE_ANSWER_PROMPT = """你是一位研究型论文助手。请基于给定的主张、证据、实验结果和章节摘要回答问题。
+
+用户问题：
+{question}
+
+问题类型：
+{route_type}
+
+证据包：
+{evidence_bundle}
+
+回答要求：
+1. 严格基于证据包回答
+2. 优先解释主张与证据之间的关系
+3. 若证据不足，请明确指出
+4. 回答要简洁、专业、可追溯"""
+
+# 回答验证 Prompt
+ANSWER_VERIFICATION_PROMPT = """你是一位答案验证器。请检查回答是否被证据支持，并指出风险。
+
+问题：{question}
+回答：{answer}
+证据：{evidence}
+
+请输出：
+1. 支持点
+2. 未被支持的点
+3. 风险警告"""
+
 # 论文结构分析 Prompt
 STRUCTURE_ANALYSIS_PROMPT = """你是一个专业的学术论文分析专家。请仔细阅读以下论文内容，识别并提取论文的基本结构信息。
 

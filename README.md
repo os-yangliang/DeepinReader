@@ -1,4 +1,4 @@
-# 📚 PaperReader — 论文阅读多智能体系统
+# 📚 DeepinReader — 论文阅读多智能体系统
 
 基于 **LangChain + LangGraph** 构建的智能论文分析与问答系统。上传论文 PDF / Word，AI 自动分析结构、生成摘要、智能问答、全文翻译、思维导图、代码生成、多文档对比。
 

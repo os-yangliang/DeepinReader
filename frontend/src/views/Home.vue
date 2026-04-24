@@ -20,8 +20,7 @@
       </div>
       
       <h1 class="text-5xl md:text-6xl font-display font-bold mb-6 leading-tight">
-        <span class="gradient-text">智能论文</span>
-        <span class="text-white">阅读助手</span>
+        <span class="gradient-text">DeepinReader</span>
       </h1>
       
       <p class="text-lg text-gray-400 max-w-2xl mx-auto mb-12 leading-relaxed">

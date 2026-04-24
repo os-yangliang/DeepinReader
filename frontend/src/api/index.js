@@ -6,7 +6,7 @@ const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
 // 创建 axios 实例
 const apiClient = axios.create({
   baseURL,
-  timeout: 60000,
+  timeout: 180000,
 })
 
 // ==================== SSE 降级 Helper ====================
@@ -41,8 +41,11 @@ function createSSEStream(url, options = {}) {
           try {
             const data = JSON.parse(line.slice(6));
             if (data.error) throw new Error(data.error);
-            if (data.done) return;
-            if (data.chunk) yield data.chunk;
+            if (data.done) {
+              yield { __done: true, ...data };
+              return;
+            }
+            if (data.chunk) yield { chunk: data.chunk };
           } catch (e) {
             if (e.message && !e.message.includes('JSON')) throw e;
             console.warn('解析 SSE 数据失败:', line);
@@ -154,8 +157,12 @@ function createWsChatStream(message) {
   const { stream, cancel, requestId } = wsRequest('chat', { message })
   const wrappedStream = (async function* () {
     for await (const item of stream) {
-      if (item.__done || item.__cancelled) return
-      if (item.chunk) yield item.chunk
+      if (item.__cancelled) return
+      if (item.__done) {
+        yield item
+        return
+      }
+      if (item.chunk) yield { chunk: item.chunk }
     }
   })()
   wrappedStream.cancel = cancel
@@ -239,7 +246,7 @@ export const paperAPI = {
     formData.append('file', file)
     const res = await apiClient.post('/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 60000,
+      timeout: 180000,
     })
     return res.data
   },
@@ -261,7 +268,7 @@ export const paperAPI = {
     formData.append('file', file)
     const res = await apiClient.post('/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 60000,
+      timeout: 180000,
       onUploadProgress: (progressEvent) => {
         if (onProgress) {
           const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
@@ -404,6 +411,31 @@ export const paperAPI = {
   
   getHistoryChat: async (historyId) => {
     const res = await apiClient.get(`/history/${historyId}/chat`)
+    return res.data
+  },
+
+  getCurrentHistoryChat: async () => {
+    const res = await apiClient.get('/history/chat')
+    return res.data
+  },
+
+  getDocumentProfile: async () => {
+    const res = await apiClient.get('/document/profile')
+    return res.data
+  },
+
+  getDocumentProfileDetail: async () => {
+    const res = await apiClient.get('/document/profile/detail')
+    return res.data
+  },
+
+  getHistoryProfileSummary: async (historyId) => {
+    const res = await apiClient.get(`/history/${historyId}/profile-summary`)
+    return res.data
+  },
+
+  getHistoryProfileDetail: async (historyId) => {
+    const res = await apiClient.get(`/history/${historyId}/profile/detail`)
     return res.data
   }
 }

@@ -20,6 +20,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agents.coordinator import PaperReaderCoordinator
 from agents.lab.lab_session import LabSession
 from services.history_store import HistoryStoreService
+from services.object_indexer import ObjectIndexer
+from services.paper_schema import PaperProfile
 from config import SUPPORTED_EXTENSIONS, MAX_FILE_SIZE_MB, CORS_ALLOW_ORIGINS
 
 logger = logging.getLogger(__name__)
@@ -59,7 +61,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title="论文阅读助手 API",
+    title="DeepinReader API",
     description="基于 LangChain + LangGraph 构建的智能论文分析与问答系统",
     version="2.0.0",
     lifespan=lifespan,
@@ -156,13 +158,18 @@ app_state = AppState()
 _coordinator_instance: Optional[PaperReaderCoordinator] = None
 
 
-def get_coordinator() -> PaperReaderCoordinator:
+def get_coordinator(require_llm: bool = True) -> PaperReaderCoordinator:
     """获取全局 Coordinator 单例"""
     global _coordinator_instance
     if _coordinator_instance is None:
-        logger.info("首次初始化 Coordinator（加载 LLM + Embedding 模型）...")
-        _coordinator_instance = PaperReaderCoordinator()
+        init_mode = "加载 LLM + Embedding 模型" if require_llm else "仅加载解析/索引能力"
+        logger.info(f"首次初始化 Coordinator（{init_mode}）...")
+        _coordinator_instance = PaperReaderCoordinator(require_llm=require_llm)
         logger.info("Coordinator 初始化完成")
+    elif require_llm and _coordinator_instance.llm_service is None:
+        logger.info("升级 Coordinator 到完整 LLM 模式...")
+        _coordinator_instance = PaperReaderCoordinator(require_llm=True, vector_store=_coordinator_instance.vector_store)
+        logger.info("Coordinator 已升级到完整模式")
     return _coordinator_instance
 
 
@@ -188,6 +195,15 @@ class ChatResponse(BaseModel):
     success: bool
     answer: str
     source_chunks: List[str] = []
+    route_type: str = "general"
+    confidence: float = 0.0
+    warnings: List[str] = []
+    evidence_summary: List[str] = []
+    reasoning_trace: List[str] = []
+    reasoning_paths: List[List[str]] = []
+    claim_nodes: List[str] = []
+    evidence_nodes: List[str] = []
+    result_nodes: List[str] = []
 
 
 class AnalysisResponse(BaseModel):
@@ -228,6 +244,70 @@ class ChatHistoryItem(BaseModel):
     content: str
     timestamp: str = ""
     source_chunks: List[str] = []
+    route_type: str = "general"
+    confidence: float = 0.0
+    warnings: List[str] = []
+    evidence_summary: List[str] = []
+    reasoning_trace: List[str] = []
+
+
+class ProfileSummaryResponse(BaseModel):
+    success: bool
+    document_id: str = ""
+    title: str = ""
+    abstract: str = ""
+    counts: Dict[str, int] = {}
+    contributions: List[str] = []
+    limitations: List[str] = []
+    keywords: List[str] = []
+
+
+class ProfileDetailResponse(ProfileSummaryResponse):
+    sections: List[dict] = []
+    claims: List[dict] = []
+    evidences: List[dict] = []
+    experiments: List[dict] = []
+    results: List[dict] = []
+    graph: Dict[str, List[str]] = {}
+
+
+def _load_profile_for_document(document_id: str) -> Optional[PaperProfile]:
+    if not document_id:
+        return None
+    coordinator = get_coordinator()
+    return ObjectIndexer(coordinator.vector_store).load_profile(document_id)
+
+
+def _build_profile_summary(profile: PaperProfile) -> Dict[str, Any]:
+    return {
+        "success": True,
+        "document_id": profile.document_id,
+        "title": profile.title,
+        "abstract": profile.abstract[:1200],
+        "counts": {
+            "sections": len(profile.sections),
+            "claims": len(profile.claims),
+            "evidences": len(profile.evidences),
+            "experiments": len(profile.experiments),
+            "results": len(profile.results),
+        },
+        "contributions": profile.contributions[:8],
+        "limitations": profile.limitations[:8],
+        "keywords": profile.keywords[:12],
+    }
+
+
+def _build_profile_detail(profile: PaperProfile) -> Dict[str, Any]:
+    payload = _build_profile_summary(profile)
+    payload.update({
+        "sections": [section.model_dump() for section in profile.sections],
+        "claims": [claim.model_dump() for claim in profile.claims],
+        "evidences": [evidence.model_dump() for evidence in profile.evidences],
+        "experiments": [experiment.model_dump() for experiment in profile.experiments],
+        "results": [result.model_dump() for result in profile.results],
+        "graph": profile.graph,
+    })
+    return payload
 
 
 # ==================== WebSocket 统一流式端点 ====================
@@ -304,28 +384,53 @@ async def websocket_endpoint(ws: WebSocket):
             if app_state.current_document_id:
                 get_history_store().add_chat_message(
                     document_id=app_state.current_document_id,
-                    role="user", content=message,
+                    role="user",
+                    content=message,
+                    route_type="general",
+                    confidence=0.0,
+                    warnings=[],
+                    evidence_summary=[],
+                    reasoning_trace=[],
                 )
         except Exception:
             pass
         full_response = ""
+        result = None
         try:
+            result = coordinator.ask_question(message)
+            if not result.success:
+                await send("error", request_id, {"message": result.error_message or "问答失败"})
+                return
+            full_response = result.answer
             for chunk in coordinator.ask_question_stream(message):
                 if _cancel_flags.get(request_id):
                     await send("cancelled", request_id, {"partial": full_response})
                     return
-                full_response += chunk
                 await send("stream", request_id, {"chunk": chunk})
                 await asyncio.sleep(0.01)
             try:
                 if app_state.current_document_id:
                     get_history_store().add_chat_message(
                         document_id=app_state.current_document_id,
-                        role="assistant", content=full_response,
+                        role="assistant",
+                        content=full_response,
+                        source_chunks=result.source_chunks[:3] if result and result.source_chunks else [],
+                        route_type=result.route_type if result else "general",
+                        confidence=result.confidence if result else 0.0,
+                        warnings=result.warnings if result else [],
+                        evidence_summary=result.evidence_summary if result else [],
+                        reasoning_trace=result.reasoning_trace if result else [],
                     )
             except Exception:
                 pass
-            await send("done", request_id, {"full_response": full_response})
+            await send("done", request_id, {
+                "full_response": full_response,
+                "route_type": result.route_type if result else "general",
+                "confidence": result.confidence if result else 0.0,
+                "warnings": result.warnings if result else [],
+                "evidence_summary": result.evidence_summary if result else [],
+                "source_chunks": result.source_chunks[:3] if result and result.source_chunks else [],
+            })
         except Exception as e:
             await send("error", request_id, {"message": str(e)})
 
@@ -543,7 +648,7 @@ async def get_document_info():
 @app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
     """上传文档：保存 + 解析 + 建立向量索引（无 LLM，~5秒）"""
-    coordinator = get_coordinator()
+    coordinator = get_coordinator(require_llm=False)
 
     try:
         filename = file.filename
@@ -579,6 +684,20 @@ async def upload_document(file: UploadFile = File(...)):
         # 添加到多文档列表并设为活跃
         doc_id = doc_info.get("document_id", file_id)
         app_state.add_document(doc_id, doc_info)
+
+        if coordinator.current_state is not None:
+            coordinator.current_state["document_id"] = doc_id
+            coordinator.current_state["parsed_doc"] = coordinator.current_state.get("parsed_doc")
+            coordinator.current_state["summary"] = ""
+            coordinator.current_state["structure_info"] = doc_info.get("structure_info", "")
+            coordinator.current_state["keywords"] = ""
+            coordinator.current_state["current_stage"] = "indexed"
+        if coordinator.qa_agent:
+            coordinator.qa_agent.set_document_context(
+                doc_id=doc_id,
+                paper_title=doc_info.get("title", ""),
+                paper_summary="",
+            )
 
         return {
             "success": True,
@@ -1043,6 +1162,11 @@ def chat(request: ChatRequest):
                 document_id=app_state.current_document_id,
                 role="user",
                 content=request.message,
+                route_type="general",
+                confidence=0.0,
+                warnings=[],
+                evidence_summary=[],
+                reasoning_trace=[],
             )
     except Exception as e:
         logger.error(f"保存消息失败: {e}")
@@ -1059,6 +1183,11 @@ def chat(request: ChatRequest):
                     role="assistant",
                     content=result.answer,
                     source_chunks=result.source_chunks[:3] if result.source_chunks else [],
+                    route_type=result.route_type,
+                    confidence=result.confidence,
+                    warnings=result.warnings,
+                    evidence_summary=result.evidence_summary,
+                    reasoning_trace=result.reasoning_trace,
                 )
         except Exception as e:
             logger.error(f"保存回复失败: {e}")
@@ -1067,12 +1196,30 @@ def chat(request: ChatRequest):
             success=True,
             answer=result.answer,
             source_chunks=result.source_chunks[:3] if result.source_chunks else [],
+            route_type=result.route_type,
+            confidence=result.confidence,
+            warnings=result.warnings,
+            evidence_summary=result.evidence_summary,
+            reasoning_trace=result.reasoning_trace,
+            reasoning_paths=result.reasoning_paths,
+            claim_nodes=result.claim_nodes,
+            evidence_nodes=result.evidence_nodes,
+            result_nodes=result.result_nodes,
         )
     else:
         return ChatResponse(
             success=False,
             answer=f"回答失败: {result.error_message}",
             source_chunks=[],
+            route_type="general",
+            confidence=0.0,
+            warnings=[],
+            evidence_summary=[],
+            reasoning_trace=[],
+            reasoning_paths=[],
+            claim_nodes=[],
+            evidence_nodes=[],
+            result_nodes=[],
         )
 
 
@@ -1094,6 +1241,11 @@ async def chat_stream(request: ChatRequest):
                 document_id=app_state.current_document_id,
                 role="user",
                 content=request.message,
+                route_type="general",
+                confidence=0.0,
+                warnings=[],
+                evidence_summary=[],
+                reasoning_trace=[],
             )
     except Exception as e:
         logger.error(f"保存消息失败: {e}")
@@ -1101,23 +1253,33 @@ async def chat_stream(request: ChatRequest):
     async def generate():
         full_response = ""
         try:
+            result = coordinator.ask_question(request.message)
+            if not result.success:
+                yield f"data: {json.dumps({'error': result.error_message or '问答失败'}, ensure_ascii=False)}\n\n"
+                return
+
             for chunk in coordinator.ask_question_stream(request.message):
                 full_response += chunk
                 yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
                 await asyncio.sleep(0.01)
 
-            # 保存助手回复
             try:
                 if app_state.current_document_id:
                     get_history_store().add_chat_message(
                         document_id=app_state.current_document_id,
                         role="assistant",
-                        content=full_response,
+                        content=result.answer,
+                        source_chunks=result.source_chunks[:3] if result.source_chunks else [],
+                        route_type=result.route_type,
+                        confidence=result.confidence,
+                        warnings=result.warnings,
+                        evidence_summary=result.evidence_summary,
+                        reasoning_trace=result.reasoning_trace,
                     )
             except Exception as e:
                 logger.error(f"保存回复失败: {e}")
 
-            yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'done': True, 'route_type': result.route_type, 'confidence': result.confidence, 'warnings': result.warnings, 'evidence_summary': result.evidence_summary, 'reasoning_trace': result.reasoning_trace, 'reasoning_paths': result.reasoning_paths, 'claim_nodes': result.claim_nodes, 'evidence_nodes': result.evidence_nodes, 'result_nodes': result.result_nodes, 'source_chunks': result.source_chunks[:3] if result.source_chunks else []}, ensure_ascii=False)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 
@@ -1709,6 +1871,63 @@ def load_history_item(history_id: str):
     except Exception as e:
         logger.error(f"加载历史记录失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/history/chat")
+async def get_current_history_chat():
+    """获取当前活跃文档的对话历史"""
+    if not app_state.current_document_id:
+        return {"chat_history": []}
+    try:
+        chat_history = get_history_store().get_chat_history(app_state.current_document_id)
+        return {"chat_history": chat_history}
+    except Exception as e:
+        logger.error(f"获取当前对话历史失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/document/profile", response_model=ProfileSummaryResponse)
+def get_document_profile_summary():
+    """获取当前文档的结构化 profile 摘要"""
+    profile = _load_profile_for_document(app_state.current_document_id or "")
+    if not profile:
+        raise HTTPException(status_code=404, detail="当前文档暂无结构化 profile")
+    return ProfileSummaryResponse(**_build_profile_summary(profile))
+
+
+@app.get("/api/history/{history_id}/profile-summary", response_model=ProfileSummaryResponse)
+def get_history_profile_summary(history_id: str):
+    """获取指定历史记录对应论文的结构化 profile 摘要"""
+    history_store = get_history_store()
+    item = history_store.get_analysis_history_detail(history_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="历史记录不存在")
+    profile = _load_profile_for_document(item.get("document_id", ""))
+    if not profile:
+        raise HTTPException(status_code=404, detail="该历史记录暂无结构化 profile")
+    return ProfileSummaryResponse(**_build_profile_summary(profile))
+
+
+@app.get("/api/document/profile/detail", response_model=ProfileDetailResponse)
+def get_document_profile_detail():
+    """获取当前文档的完整结构化 profile"""
+    profile = _load_profile_for_document(app_state.current_document_id or "")
+    if not profile:
+        raise HTTPException(status_code=404, detail="当前文档暂无结构化 profile")
+    return ProfileDetailResponse(**_build_profile_detail(profile))
+
+
+@app.get("/api/history/{history_id}/profile/detail", response_model=ProfileDetailResponse)
+def get_history_profile_detail(history_id: str):
+    """获取指定历史记录对应论文的完整结构化 profile"""
+    history_store = get_history_store()
+    item = history_store.get_analysis_history_detail(history_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="历史记录不存在")
+    profile = _load_profile_for_document(item.get("document_id", ""))
+    if not profile:
+        raise HTTPException(status_code=404, detail="该历史记录暂无结构化 profile")
+    return ProfileDetailResponse(**_build_profile_detail(profile))
 
 
 @app.delete("/api/history/{history_id}")

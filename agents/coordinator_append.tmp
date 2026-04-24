@@ -1,0 +1,169 @@
+
+        try:
+            final_state = self.workflow.invoke(initial_state)
+            self.current_state = final_state
+            if final_state.get("document_id"):
+                parsed_doc = final_state.get("parsed_doc")
+                self.qa_agent.set_document_context(
+                    doc_id=final_state["document_id"],
+                    paper_title=parsed_doc.title if parsed_doc else "",
+                    paper_summary=(final_state.get("summary") or "")[:500],
+                )
+            total_time = time.time() - start_time
+            if final_state.get("current_stage") in ["summarized", "answered"]:
+                parsed_doc = final_state.get("parsed_doc")
+                return ProcessingResult(
+                    success=True,
+                    stage=final_state["current_stage"],
+                    document_id=final_state.get("document_id", ""),
+                    paper_title=parsed_doc.title if parsed_doc else "",
+                    structure_info=final_state.get("structure_info") or "",
+                    summary=final_state.get("summary") or "",
+                    keywords=final_state.get("keywords") or "",
+                    total_time=total_time,
+                    stage_times=final_state.get("processing_times", {}),
+                )
+            return ProcessingResult(
+                success=False,
+                stage=final_state.get("current_stage", "unknown"),
+                error_message=final_state.get("error_message") or "未知错误",
+                total_time=total_time,
+            )
+        except Exception as e:
+            logger.exception("process_document 异常")
+            return ProcessingResult(success=False, stage="exception", error_message=str(e), total_time=time.time() - start_time)
+
+    def ask_question(self, question: str) -> QAResult:
+        return self.qa_agent.ask(question)
+
+    def ask_question_stream(self, question: str):
+        yield from self.qa_agent.ask_stream(question)
+
+    def get_suggested_questions(self) -> List[str]:
+        return self.qa_agent.get_suggested_questions()
+
+    def clear_chat_history(self) -> None:
+        self.qa_agent.clear_history()
+
+    def parse_and_index(self, file_bytes: bytes, filename: str) -> dict:
+        result = self.parser_agent.parse_document_from_bytes(file_bytes, filename)
+        if not result.success or not result.parsed_doc:
+            raise ValueError(result.error_message or "文档解析失败")
+
+        parsed_doc = result.parsed_doc
+        doc_id = result.document_id
+        self.current_state = {
+            "document_id": doc_id,
+            "parsed_doc": parsed_doc,
+            "summary": "",
+            "structure_info": result.structure_info,
+            "keywords": "",
+            "current_stage": "indexed",
+        }
+        self.qa_agent.set_document_context(doc_id=doc_id, paper_title=parsed_doc.title or "", paper_summary="")
+        return {
+            "filename": parsed_doc.filename,
+            "title": parsed_doc.title,
+            "file_type": parsed_doc.file_type,
+            "page_count": parsed_doc.page_count,
+            "word_count": parsed_doc.word_count,
+            "document_id": doc_id,
+            "structure_info": result.structure_info,
+        }
+
+    def stream_analysis(self):
+        from prompts.templates import PAPER_ANALYSIS_PROMPT
+
+        if not self.current_state or not self.current_state.get("parsed_doc"):
+            yield {"stage": "error", "message": "请先上传文档"}
+            return
+
+        parsed_doc = self.current_state["parsed_doc"]
+        content = parsed_doc.content
+        max_len = 15000
+        if len(content) > max_len:
+            head = int(max_len * 0.6)
+            tail = max_len - head
+            content = content[:head] + "\n\n...(中间部分省略)...\n\n" + content[-tail:]
+
+        yield {"stage": "progress", "percent": 10, "step": "preparing", "message": "正在准备分析..."}
+        prompt = PAPER_ANALYSIS_PROMPT.format(paper_content=content)
+        yield {"stage": "progress", "percent": 30, "step": "llm_start", "message": "AI 模型开始分析..."}
+
+        full_response = ""
+        chunk_count = 0
+        try:
+            for chunk in self.llm_service.stream_chat(prompt):
+                full_response += chunk
+                chunk_count += 1
+                yield {"stage": "analyzing", "chunk": chunk}
+                if chunk_count % 10 == 0:
+                    progress = min(35 + len(full_response) // 80, 90)
+                    yield {"stage": "progress", "percent": progress, "step": "llm_running", "message": "正在深度分析论文内容..."}
+            self.current_state["summary"] = full_response
+            if self.current_state.get("document_id"):
+                self.qa_agent.set_document_context(
+                    doc_id=self.current_state["document_id"],
+                    paper_title=parsed_doc.title or "",
+                    paper_summary=full_response[:500],
+                )
+            yield {
+                "stage": "done",
+                "analysis": full_response,
+                "document_info": {
+                    "filename": parsed_doc.filename,
+                    "title": parsed_doc.title,
+                    "file_type": parsed_doc.file_type,
+                    "page_count": parsed_doc.page_count,
+                    "word_count": parsed_doc.word_count,
+                    "document_id": self.current_state.get("document_id", ""),
+                },
+            }
+        except Exception as e:
+            yield {"stage": "error", "message": str(e)}
+
+    def process_document_stream(self, file_bytes: bytes, filename: str):
+        try:
+            result = self.parser_agent.parse_document_from_bytes(file_bytes, filename)
+            if not result.success or not result.parsed_doc:
+                yield {"stage": "error", "message": result.error_message or "解析失败"}
+                return
+            parsed_doc = result.parsed_doc
+            self.current_state = {
+                "document_id": result.document_id,
+                "parsed_doc": parsed_doc,
+                "summary": "",
+                "structure_info": result.structure_info,
+                "keywords": "",
+                "current_stage": "indexed",
+            }
+            self.qa_agent.set_document_context(result.document_id, parsed_doc.title or "", "")
+            yield {
+                "stage": "parsed",
+                "document_info": {
+                    "filename": parsed_doc.filename,
+                    "title": parsed_doc.title,
+                    "file_type": parsed_doc.file_type,
+                    "page_count": parsed_doc.page_count,
+                    "word_count": parsed_doc.word_count,
+                    "document_id": result.document_id,
+                },
+            }
+            for event in self.stream_analysis():
+                yield event
+        except Exception as e:
+            yield {"stage": "error", "message": str(e)}
+
+    def generate_code_stream(self, user_request: str, target_framework: str, paper_summary: str):
+        prompt = CODE_GENERATION_PROMPT.format(
+            user_request=user_request,
+            target_framework=target_framework,
+            paper_summary=paper_summary,
+        )
+        for chunk in self.llm_service.stream_chat(prompt, system_prompt=CODE_GENERATION_SYSTEM_PROMPT):
+            yield chunk
+
+    def translate_stream(self, text: str):
+        prompt = TRANSLATE_PROMPT.format(text=text)
+        for chunk in self.llm_service.stream_chat(prompt):
+            yield chunk

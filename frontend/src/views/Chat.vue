@@ -54,7 +54,11 @@
       </div>
 
       <!-- 右侧：问答面板 -->
-      <div class="w-1/2 flex flex-col bg-gray-900/80 backdrop-blur-xl">
+      <div class="w-[54%] flex flex-col bg-gray-900/80 backdrop-blur-xl">
+        <div v-if="store.documentInfo" class="chat-meta-hero">
+          <div class="meta-chip meta-chip-primary meta-chip-center">Claim-Evidence QA</div>
+          <div class="meta-chip meta-chip-subtitle">问题路由 · 风险提示 · 推理路径</div>
+        </div>
         <!-- 消息区域 -->
         <div class="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4" ref="chatContainer">
           
@@ -88,29 +92,78 @@
                 <User :size="14" v-if="msg.role === 'user'" />
                 <Bot :size="14" v-else />
               </div>
-              <!-- 消息内容 -->
-              <div class="message-bubble" :class="msg.role === 'user' ? 'message-user' : 'message-ai'">
-                <div v-if="msg.content" class="markdown-content text-sm" v-html="renderMarkdown(msg.content)"></div>
-                <div v-else class="flex gap-1.5 h-5 items-center px-2">
-                  <span class="typing-dot"></span>
-                  <span class="typing-dot" style="animation-delay: 0.15s"></span>
-                  <span class="typing-dot" style="animation-delay: 0.3s"></span>
-                </div>
-              </div>
-            </div>
-            <!-- 引用来源 -->
-            <div v-if="msg.sources && msg.sources.length" class="ml-11 mt-2 mb-4">
-              <button @click="msg.showSources = !msg.showSources" class="text-xs text-primary-400/70 hover:text-primary-400 flex items-center gap-1 mb-2 transition-colors">
-                <BookMarked :size="12" />
-                {{ msg.showSources ? '收起' : '查看' }}引用来源 ({{ msg.sources.length }})
-              </button>
-              <div v-if="msg.showSources" class="space-y-2">
-                <div v-for="(src, si) in msg.sources" :key="si" class="source-card">
-                  <div class="flex items-center gap-2 mb-1">
-                    <span class="source-badge">📄 第 {{ src.page }} 页</span>
-                    <span v-if="src.section" class="text-[10px] text-gray-500">{{ src.section }}</span>
+              <div class="message-column" :class="msg.role === 'user' ? 'items-end' : 'items-start'">
+                <!-- 消息内容 -->
+                <div class="message-bubble" :class="msg.role === 'user' ? 'message-user' : 'message-ai'">
+                  <div v-if="msg.content" class="markdown-content text-sm" v-html="renderMarkdown(msg.content)"></div>
+                  <div v-else class="flex gap-1.5 h-5 items-center px-2">
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot" style="animation-delay: 0.15s"></span>
+                    <span class="typing-dot" style="animation-delay: 0.3s"></span>
                   </div>
-                  <p class="text-xs text-gray-400 leading-relaxed">{{ src.text }}</p>
+                </div>
+
+                <div v-if="msg.role === 'assistant' && msg.content" class="assistant-meta-card">
+                  <div class="assistant-meta-head">
+                    <div class="route-pill">{{ formatRouteType(msg.routeType) }}</div>
+                    <div class="confidence-pill" :class="confidenceClass(msg.confidence)">
+                      置信度 {{ formatConfidence(msg.confidence) }}
+                    </div>
+                  </div>
+
+                  <div v-if="msg.warnings?.length" class="meta-group">
+                    <button @click="msg.showWarnings = !msg.showWarnings" class="meta-toggle warning-toggle">
+                      <span>风险提示</span>
+                      <ChevronDown :size="13" :class="{ 'rotate-180': msg.showWarnings }" />
+                    </button>
+                    <div v-if="msg.showWarnings" class="meta-list">
+                      <div v-for="(item, i) in msg.warnings" :key="i" class="meta-item warning-item">{{ item }}</div>
+                    </div>
+                  </div>
+
+                  <div v-if="msg.reasoningTrace?.length" class="meta-group">
+                    <button @click="msg.showReasoning = !msg.showReasoning" class="meta-toggle reasoning-toggle">
+                      <span>推理路径</span>
+                      <ChevronDown :size="13" :class="{ 'rotate-180': msg.showReasoning }" />
+                    </button>
+                    <ol v-if="msg.showReasoning" class="reasoning-list">
+                      <li v-for="(item, i) in msg.reasoningTrace" :key="i">{{ item }}</li>
+                    </ol>
+                  </div>
+
+                  <div v-if="msg.showProofGraph" class="meta-group proof-graph-group">
+                    <button @click="msg.showProofGraph = !msg.showProofGraph" class="meta-toggle proof-toggle">
+                      <span>Proof Graph</span>
+                      <ChevronDown :size="13" :class="{ 'rotate-180': msg.showProofGraph }" />
+                    </button>
+                    <div v-if="msg.showProofGraph" class="proof-graph-card">
+                      <div v-if="msg.claimNodes?.length" class="proof-lane">
+                        <div class="proof-label">Claims</div>
+                        <div class="proof-chip-row">
+                          <span v-for="item in msg.claimNodes" :key="item" class="proof-chip proof-chip-claim">{{ item }}</span>
+                        </div>
+                      </div>
+                      <div v-if="msg.evidenceNodes?.length" class="proof-lane">
+                        <div class="proof-label">Evidence</div>
+                        <div class="proof-chip-row">
+                          <span v-for="item in msg.evidenceNodes" :key="item" class="proof-chip proof-chip-evidence">{{ item }}</span>
+                        </div>
+                      </div>
+                      <div v-if="msg.resultNodes?.length" class="proof-lane">
+                        <div class="proof-label">Results</div>
+                        <div class="proof-chip-row">
+                          <span v-for="item in msg.resultNodes" :key="item" class="proof-chip proof-chip-result">{{ item }}</span>
+                        </div>
+                      </div>
+                      <div v-if="msg.reasoningPaths?.length" class="proof-path-list">
+                        <div v-for="(path, i) in msg.reasoningPaths" :key="i" class="proof-path-item">{{ formatPath(path) }}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-if="msg.sourceChunks?.length" class="meta-list">
+                    <div v-for="(chunk, i) in msg.sourceChunks" :key="i" class="meta-item source-chunk-item">{{ chunk }}</div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -151,19 +204,74 @@ import { renderMarkdown } from '../utils/markdown'
 import VuePdfEmbed from 'vue-pdf-embed'
 import api from '../api'
 import { store } from '../store'
-import { 
-  MessageCircle, FileText, FileSearch, Upload, Clock, Bot, User, 
-  Send, Loader2, Lightbulb, Trash2, BookMarked, Square 
+import {
+  MessageCircle, FileText, FileSearch, Upload, Clock, Bot, User,
+  Send, Lightbulb, Trash2, Square, ChevronDown
 } from 'lucide-vue-next'
 
 const inputMessage = ref('')
 const isChatting = ref(false)
-const activeStream = ref(null) // 当前活跃的流（用于取消）
+const activeStream = ref(null)
 const messages = ref([])
 const chatContainer = ref(null)
 const suggestedQuestions = ref([])
 
+const createAssistantMessage = () => ({
+  role: 'assistant',
+  content: '',
+  routeType: 'general',
+  confidence: 0,
+  warnings: [],
+  evidenceSummary: [],
+  reasoningTrace: [],
+  reasoningPaths: [],
+  claimNodes: [],
+  evidenceNodes: [],
+  resultNodes: [],
+  sourceChunks: [],
+  showEvidence: true,
+  showWarnings: true,
+  showReasoning: false,
+  showProofGraph: true,
+})
 
+const normalizeHistoryMessage = (item) => ({
+  role: item.role,
+  content: item.content,
+  routeType: item.route_type || 'general',
+  confidence: item.confidence || 0,
+  warnings: item.warnings || [],
+  evidenceSummary: item.evidence_summary || [],
+  reasoningTrace: item.reasoning_trace || [],
+  reasoningPaths: item.reasoning_paths || [],
+  claimNodes: item.claim_nodes || [],
+  evidenceNodes: item.evidence_nodes || [],
+  resultNodes: item.result_nodes || [],
+  sourceChunks: item.source_chunks || [],
+  showEvidence: false,
+  showWarnings: false,
+  showReasoning: false,
+  showProofGraph: false,
+})
+
+const formatRouteType = (route) => ({
+  structure: '结构问题',
+  method: '方法解释',
+  evidence: '证据验证',
+  result: '实验结果',
+  critical: '批判分析',
+  general: '综合问答',
+}[route] || '综合问答')
+
+const formatConfidence = (value) => `${Math.round((value || 0) * 100)}%`
+const confidenceClass = (value) => {
+  const score = value || 0
+  if (score >= 0.75) return 'confidence-high'
+  if (score >= 0.45) return 'confidence-mid'
+  return 'confidence-low'
+}
+
+const formatPath = (path) => Array.isArray(path) ? path.join(' ') : path
 
 const useQuestion = (q) => {
   inputMessage.value = q
@@ -182,35 +290,34 @@ const sendMessage = async () => {
   isChatting.value = true
   
   messages.value.push({ role: 'user', content })
-  messages.value.push({ role: 'assistant', content: '', sources: null, showSources: false }) 
+  messages.value.push(createAssistantMessage())
   
   nextTick(() => scrollToBottom())
   
   try {
-    let responseText = ''
     const lastMsg = messages.value[messages.value.length - 1]
     const stream = api.chatStream(content)
-    activeStream.value = stream  // 保存引用以便取消
-    for await (const chunk of stream) {
-      responseText += chunk
-      const srcIdx = responseText.indexOf('\n__SOURCES__')
-      if (srcIdx !== -1) {
-        lastMsg.content = responseText.substring(0, srcIdx)
-        try {
-          const srcJson = responseText.substring(srcIdx + 12)
-          lastMsg.sources = JSON.parse(srcJson)
-        } catch(e) {}
-      } else {
-        lastMsg.content = responseText
+    activeStream.value = stream
+    for await (const event of stream) {
+      if (event.chunk) {
+        lastMsg.content += event.chunk
+      }
+      if (event.__done || event.done) {
+        lastMsg.routeType = event.route_type || lastMsg.routeType
+        lastMsg.confidence = event.confidence || 0
+        lastMsg.warnings = event.warnings || []
+        lastMsg.evidenceSummary = event.evidence_summary || []
+        lastMsg.reasoningTrace = event.reasoning_trace || []
+        lastMsg.reasoningPaths = event.reasoning_paths || []
+        lastMsg.claimNodes = event.claim_nodes || []
+        lastMsg.evidenceNodes = event.evidence_nodes || []
+        lastMsg.resultNodes = event.result_nodes || []
+        lastMsg.sourceChunks = event.source_chunks || []
+        lastMsg.showEvidence = !!lastMsg.evidenceSummary.length
+        lastMsg.showWarnings = !!lastMsg.warnings.length
+        lastMsg.showProofGraph = !!(lastMsg.reasoningPaths.length || lastMsg.claimNodes.length || lastMsg.evidenceNodes.length || lastMsg.resultNodes.length)
       }
       scrollToBottom()
-    }
-    const finalIdx = responseText.indexOf('\n__SOURCES__')
-    if (finalIdx !== -1) {
-      lastMsg.content = responseText.substring(0, finalIdx)
-      try {
-        lastMsg.sources = JSON.parse(responseText.substring(finalIdx + 12))
-      } catch(e) {}
     }
   } catch (e) {
     messages.value[messages.value.length - 1].content = '回答出错: ' + e.message
@@ -247,12 +354,9 @@ onMounted(async () => {
             if (suggestionsRes.questions) {
                 suggestedQuestions.value = suggestionsRes.questions
             }
-            const res = await api.getHistoryChat(store.documentInfo.document_id)
+            const res = await api.getCurrentHistoryChat()
             if (res.chat_history) {
-                messages.value = res.chat_history.map(item => ({
-                    role: item.role,
-                    content: item.content
-                }))
+                messages.value = res.chat_history.map(normalizeHistoryMessage)
                 nextTick(() => scrollToBottom())
             }
         } catch(e) {
@@ -347,8 +451,15 @@ onMounted(async () => {
 }
 
 /* Message bubbles */
-.message-bubble {
+.message-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   max-width: 80%;
+}
+
+.message-bubble {
+  max-width: 100%;
   padding: 12px 16px;
   border-radius: 16px;
 }

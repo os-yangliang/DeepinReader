@@ -18,7 +18,7 @@
             </div>
             <div class="flex flex-col">
               <span class="font-display text-lg font-semibold text-white leading-tight tracking-wide">
-                PaperReader
+                DeepinReader
               </span>
               <span class="text-[10px] text-gray-400 tracking-widest uppercase">AI论文助手</span>
             </div>
