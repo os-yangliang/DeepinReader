@@ -45,7 +45,7 @@ class ParserAgent:
         self.llm_factory = llm_factory or LLMService
         self.section_parser = SectionParser()
         self.object_extractor = None
-        self.graph_builder = PaperGraphBuilder()
+        self.graph_builder = PaperGraphBuilder(embedding_model=self.vector_store.embeddings)
         self.object_indexer = ObjectIndexer(self.vector_store)
 
 

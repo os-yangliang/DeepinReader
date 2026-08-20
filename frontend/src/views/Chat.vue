@@ -1,199 +1,142 @@
 <template>
-  <div class="h-[calc(100vh-80px)] flex flex-col">
-    <!-- 顶部工具栏 -->
-    <div class="h-14 toolbar-glass px-6 flex items-center justify-between z-20">
-      <div class="flex items-center gap-4">
-        <div class="flex items-center gap-2">
-          <MessageCircle :size="20" class="text-primary-400" />
-          <h1 class="text-lg font-semibold text-white">智能问答</h1>
-        </div>
-        <div v-if="store.documentInfo" class="flex items-center gap-2 text-gray-400 text-sm border-l border-white/10 pl-4">
-          <FileText :size="14" />
-          <span class="max-w-[200px] truncate">{{ store.documentInfo.filename }}</span>
-        </div>
-      </div>
-      <div v-if="messages.length > 0" class="flex items-center gap-2">
-        <button @click="clearChat" class="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border border-white/5 transition-all flex items-center gap-1.5">
-          <Trash2 :size="12" />
+  <div class="chat-page">
+    <PageToolbar :icon="MessageCircle" title="智能问答" subtitle="证据驱动的论文问答" :accent="'var(--accent-1)'">
+      <template #actions>
+        <button v-if="messages.length > 0" class="btn-secondary" @click="clearChat">
+          <Trash2 :size="14" />
           清空对话
         </button>
-      </div>
-    </div>
+      </template>
+    </PageToolbar>
 
-    <!-- 主体内容区 -->
-    <div class="flex-1 flex overflow-hidden relative">
-      
-      <!-- 未加载文档时的提示 -->
-      <div v-if="!store.pdfUrl" class="absolute inset-0 z-50 flex items-center justify-center bg-gray-900/90 backdrop-blur-sm">
-        <div class="text-center max-w-md">
-          <div class="empty-icon-wrapper mx-auto mb-6">
-            <FileSearch :size="36" class="text-primary-400/60" />
-          </div>
-          <h3 class="text-xl font-bold text-white mb-2">尚未加载文档</h3>
-          <p class="text-gray-400 mb-8 text-sm leading-relaxed">请先在分析页面上传文档，或从历史记录中打开之前分析过的论文。</p>
-          <div class="flex gap-3 justify-center">
-            <router-link to="/analyze" class="btn-glow px-6 py-2.5 text-sm flex items-center gap-2">
-              <Upload :size="16" />
-              去上传
-            </router-link>
-            <router-link to="/history" class="btn-secondary px-6 py-2.5 text-sm flex items-center gap-2">
-              <Clock :size="16" />
-              查历史
-            </router-link>
-          </div>
-        </div>
+    <div class="chat-body">
+      <!-- 未加载文档 -->
+      <div v-if="!store.pdfUrl" class="chat-empty-wrap">
+        <EmptyState :icon="FileSearch" title="尚未加载文档" description="请先在分析页面上传文档，或从历史记录中打开之前分析过的论文。">
+          <router-link to="/analyze" class="btn-primary"><Upload :size="16" /> 去上传</router-link>
+          <router-link to="/history" class="btn-secondary"><Clock :size="16" /> 查历史</router-link>
+        </EmptyState>
       </div>
 
-      <!-- 左侧：PDF 阅读器 -->
-      <div class="w-1/2 bg-gray-900/50 relative flex flex-col border-r border-white/5">
-        <div v-if="store.pdfUrl" class="flex-1 overflow-y-auto custom-scrollbar p-8 flex justify-center">
-          <div class="w-full max-w-4xl shadow-2xl">
-            <vue-pdf-embed :source="store.pdfUrl" class="rounded-lg overflow-hidden" />
-          </div>
+      <template v-else>
+        <!-- 左侧 PDF 阅读器 -->
+        <div class="pdf-pane">
+          <PdfReader v-if="store.pdfUrl" ref="pdfReaderRef" :source="store.pdfUrl" />
         </div>
-      </div>
 
-      <!-- 右侧：问答面板 -->
-      <div class="w-[54%] flex flex-col bg-gray-900/80 backdrop-blur-xl">
-        <div v-if="store.documentInfo" class="chat-meta-hero">
-          <div class="meta-chip meta-chip-primary meta-chip-center">Claim-Evidence QA</div>
-          <div class="meta-chip meta-chip-subtitle">问题路由 · 风险提示 · 推理路径</div>
-        </div>
-        <!-- 消息区域 -->
-        <div class="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4" ref="chatContainer">
-          
-          <!-- 欢迎状态 -->
-          <div v-if="messages.length === 0" class="flex flex-col items-center justify-center h-full py-8">
-            <div class="welcome-icon mb-6">
-              <Bot :size="28" class="text-primary-400" />
+        <!-- 右侧问答 -->
+        <div class="qa-pane">
+          <div class="qa-scroll" ref="chatContainer">
+            <!-- 欢迎 -->
+            <div v-if="messages.length === 0" class="qa-welcome">
+              <div class="welcome-icon">
+                <Bot :size="26" />
+              </div>
+              <p class="welcome-title">你好，我是你的论文助手</p>
+              <p class="welcome-sub">基于 Claim-Evidence 图谱，给出有证据支撑的回答</p>
+
+              <div v-if="suggestedQuestions.length" class="suggestions">
+                <button
+                  v-for="(q, i) in suggestedQuestions"
+                  :key="i"
+                  class="suggestion"
+                  @click="useQuestion(q)"
+                >
+                  <Lightbulb :size="14" />
+                  <span>{{ q }}</span>
+                </button>
+              </div>
             </div>
-            <p class="text-gray-400 text-sm mb-2">👋 你好！我是你的论文助手</p>
-            <p v-if="suggestedQuestions.length === 0" class="text-gray-500 text-xs">你可以问我任何关于这篇论文的问题</p>
-            
-            <!-- 建议问题 -->
-            <div v-if="suggestedQuestions.length > 0" class="grid grid-cols-1 gap-2 max-w-sm w-full mt-6">
-              <button 
-                v-for="(q, i) in suggestedQuestions" 
-                :key="i"
-                @click="useQuestion(q)"
-                class="suggestion-chip group"
+
+            <!-- 消息 -->
+            <div v-else class="msg-list">
+              <div v-for="(msg, index) in messages" :key="index" class="msg-row" :class="{ 'from-user': msg.role === 'user' }">
+                <div class="avatar" :class="msg.role === 'user' ? 'avatar-user' : 'avatar-ai'">
+                  <User :size="14" v-if="msg.role === 'user'" />
+                  <Bot :size="14" v-else />
+                </div>
+                <div class="msg-col">
+                  <div class="bubble" :class="msg.role === 'user' ? 'bubble-user' : 'bubble-ai'">
+                    <div v-if="msg.content" class="markdown-content" v-html="renderMarkdown(msg.content)"></div>
+                    <div v-else class="typing-dots">
+                      <span></span><span></span><span></span>
+                    </div>
+                  </div>
+
+                  <!-- 元信息 -->
+                  <div v-if="msg.role === 'assistant' && msg.content" class="meta-card">
+                    <div class="meta-head">
+                      <span class="meta-pill">{{ formatRouteType(msg.routeType) }}</span>
+                      <span class="meta-pill" :class="confidenceClass(msg.confidence)">
+                        置信度 {{ formatConfidence(msg.confidence) }}
+                      </span>
+                    </div>
+
+                    <div v-if="msg.warnings?.length" class="meta-group">
+                      <button class="meta-toggle" @click="msg.showWarnings = !msg.showWarnings">
+                        <span>风险提示</span>
+                        <ChevronDown :size="13" :class="{ 'rotate-180': msg.showWarnings }" />
+                      </button>
+                      <div v-if="msg.showWarnings" class="meta-list">
+                        <div v-for="(w, i) in msg.warnings" :key="i" class="meta-warn">{{ w }}</div>
+                      </div>
+                    </div>
+
+                    <div v-if="msg.reasoningTrace?.length" class="meta-group">
+                      <button class="meta-toggle" @click="msg.showReasoning = !msg.showReasoning">
+                        <span>推理路径</span>
+                        <ChevronDown :size="13" :class="{ 'rotate-180': msg.showReasoning }" />
+                      </button>
+                      <ol v-if="msg.showReasoning" class="reasoning-list">
+                        <li v-for="(r, i) in msg.reasoningTrace" :key="i">{{ r }}</li>
+                      </ol>
+                    </div>
+
+                    <div v-if="msg.sourceChunks?.length" class="source-list">
+                      <div v-for="(c, i) in msg.sourceChunks" :key="i" class="source-item">
+                        <span class="source-text">{{ c }}</span>
+                        <button class="source-locate" @click="locateSource(c)" title="定位到原文">
+                          <LocateFixed :size="12" /> 定位
+                        </button>
+                      </div>
+                    </div>
+
+                    <div v-if="msg.role === 'assistant' && msg.content && msg.warnings?.length" class="followup-row">
+                      <button class="followup-btn" @click="askFollowUp(msg.warnings)">
+                        <RefreshCcw :size="12" /> 换种问法追问
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 输入区 -->
+          <div class="input-zone">
+            <div class="input-box">
+              <input
+                v-model="inputMessage"
+                @keyup.enter="sendMessage"
+                type="text"
+                placeholder="输入你的问题，回车发送..."
+                class="chat-input"
+                :disabled="isChatting || !store.documentInfo"
+              />
+              <button
+                class="send-btn"
+                :class="{ 'send-btn-stop': isChatting }"
+                @click="isChatting ? cancelChat() : sendMessage()"
+                :disabled="!isChatting && !inputMessage.trim()"
               >
-                <Lightbulb :size="14" class="text-primary-500 flex-shrink-0 group-hover:scale-110 transition-transform" />
-                <span class="text-left">{{ q }}</span>
+                <Square :size="17" v-if="isChatting" />
+                <Send :size="17" v-else />
               </button>
             </div>
-          </div>
-          
-          <!-- 消息列表 -->
-          <div v-for="(msg, index) in messages" :key="index">
-            <div class="flex gap-3 animate-fade-in" :class="msg.role === 'user' ? 'flex-row-reverse' : ''">
-              <!-- 头像 -->
-              <div class="avatar" :class="msg.role === 'user' ? 'avatar-user' : 'avatar-ai'">
-                <User :size="14" v-if="msg.role === 'user'" />
-                <Bot :size="14" v-else />
-              </div>
-              <div class="message-column" :class="msg.role === 'user' ? 'items-end' : 'items-start'">
-                <!-- 消息内容 -->
-                <div class="message-bubble" :class="msg.role === 'user' ? 'message-user' : 'message-ai'">
-                  <div v-if="msg.content" class="markdown-content text-sm" v-html="renderMarkdown(msg.content)"></div>
-                  <div v-else class="flex gap-1.5 h-5 items-center px-2">
-                    <span class="typing-dot"></span>
-                    <span class="typing-dot" style="animation-delay: 0.15s"></span>
-                    <span class="typing-dot" style="animation-delay: 0.3s"></span>
-                  </div>
-                </div>
-
-                <div v-if="msg.role === 'assistant' && msg.content" class="assistant-meta-card">
-                  <div class="assistant-meta-head">
-                    <div class="route-pill">{{ formatRouteType(msg.routeType) }}</div>
-                    <div class="confidence-pill" :class="confidenceClass(msg.confidence)">
-                      置信度 {{ formatConfidence(msg.confidence) }}
-                    </div>
-                  </div>
-
-                  <div v-if="msg.warnings?.length" class="meta-group">
-                    <button @click="msg.showWarnings = !msg.showWarnings" class="meta-toggle warning-toggle">
-                      <span>风险提示</span>
-                      <ChevronDown :size="13" :class="{ 'rotate-180': msg.showWarnings }" />
-                    </button>
-                    <div v-if="msg.showWarnings" class="meta-list">
-                      <div v-for="(item, i) in msg.warnings" :key="i" class="meta-item warning-item">{{ item }}</div>
-                    </div>
-                  </div>
-
-                  <div v-if="msg.reasoningTrace?.length" class="meta-group">
-                    <button @click="msg.showReasoning = !msg.showReasoning" class="meta-toggle reasoning-toggle">
-                      <span>推理路径</span>
-                      <ChevronDown :size="13" :class="{ 'rotate-180': msg.showReasoning }" />
-                    </button>
-                    <ol v-if="msg.showReasoning" class="reasoning-list">
-                      <li v-for="(item, i) in msg.reasoningTrace" :key="i">{{ item }}</li>
-                    </ol>
-                  </div>
-
-                  <div v-if="msg.showProofGraph" class="meta-group proof-graph-group">
-                    <button @click="msg.showProofGraph = !msg.showProofGraph" class="meta-toggle proof-toggle">
-                      <span>Proof Graph</span>
-                      <ChevronDown :size="13" :class="{ 'rotate-180': msg.showProofGraph }" />
-                    </button>
-                    <div v-if="msg.showProofGraph" class="proof-graph-card">
-                      <div v-if="msg.claimNodes?.length" class="proof-lane">
-                        <div class="proof-label">Claims</div>
-                        <div class="proof-chip-row">
-                          <span v-for="item in msg.claimNodes" :key="item" class="proof-chip proof-chip-claim">{{ item }}</span>
-                        </div>
-                      </div>
-                      <div v-if="msg.evidenceNodes?.length" class="proof-lane">
-                        <div class="proof-label">Evidence</div>
-                        <div class="proof-chip-row">
-                          <span v-for="item in msg.evidenceNodes" :key="item" class="proof-chip proof-chip-evidence">{{ item }}</span>
-                        </div>
-                      </div>
-                      <div v-if="msg.resultNodes?.length" class="proof-lane">
-                        <div class="proof-label">Results</div>
-                        <div class="proof-chip-row">
-                          <span v-for="item in msg.resultNodes" :key="item" class="proof-chip proof-chip-result">{{ item }}</span>
-                        </div>
-                      </div>
-                      <div v-if="msg.reasoningPaths?.length" class="proof-path-list">
-                        <div v-for="(path, i) in msg.reasoningPaths" :key="i" class="proof-path-item">{{ formatPath(path) }}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div v-if="msg.sourceChunks?.length" class="meta-list">
-                    <div v-for="(chunk, i) in msg.sourceChunks" :key="i" class="meta-item source-chunk-item">{{ chunk }}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <p class="input-hint">基于 Plan-and-Solve · 证据充分性估计 · 支持取消</p>
           </div>
         </div>
-        
-        <!-- 输入区域 -->
-        <div class="p-4 border-t border-white/5">
-          <div class="input-wrapper">
-            <input 
-              v-model="inputMessage" 
-              @keyup.enter="sendMessage"
-              type="text" 
-              placeholder="输入你的问题..." 
-              class="chat-input"
-              :disabled="isChatting || !store.documentInfo"
-            >
-            <button 
-              @click="isChatting ? cancelChat() : sendMessage()"
-              :disabled="!isChatting && !inputMessage.trim()"
-              class="send-btn"
-              :class="{ 'send-btn-cancel': isChatting }"
-            >
-              <Square :size="18" v-if="isChatting" />
-              <Send :size="18" v-else />
-            </button>
-          </div>
-          <p class="text-[11px] text-gray-600 mt-2 text-center">基于 Plan-and-Solve 策略 · 支持联网搜索</p>
-        </div>
-      </div>
+      </template>
     </div>
   </div>
 </template>
@@ -201,14 +144,14 @@
 <script setup>
 import { ref, nextTick, onMounted } from 'vue'
 import { renderMarkdown } from '../utils/markdown'
-import VuePdfEmbed from 'vue-pdf-embed'
 import api from '../api'
 import { store } from '../store'
 import {
-  MessageCircle, FileText, FileSearch, Upload, Clock, Bot, User,
-  Send, Lightbulb, Trash2, Square, ChevronDown
+  MessageCircle, FileSearch, Upload, Clock, Bot, User,
+  Send, Lightbulb, Trash2, Square, ChevronDown, LocateFixed, RefreshCcw,
 } from 'lucide-vue-next'
 
+const pdfReaderRef = ref(null)
 const inputMessage = ref('')
 const isChatting = ref(false)
 const activeStream = ref(null)
@@ -229,10 +172,8 @@ const createAssistantMessage = () => ({
   evidenceNodes: [],
   resultNodes: [],
   sourceChunks: [],
-  showEvidence: true,
   showWarnings: true,
   showReasoning: false,
-  showProofGraph: true,
 })
 
 const normalizeHistoryMessage = (item) => ({
@@ -248,10 +189,8 @@ const normalizeHistoryMessage = (item) => ({
   evidenceNodes: item.evidence_nodes || [],
   resultNodes: item.result_nodes || [],
   sourceChunks: item.source_chunks || [],
-  showEvidence: false,
   showWarnings: false,
   showReasoning: false,
-  showProofGraph: false,
 })
 
 const formatRouteType = (route) => ({
@@ -263,59 +202,65 @@ const formatRouteType = (route) => ({
   general: '综合问答',
 }[route] || '综合问答')
 
-const formatConfidence = (value) => `${Math.round((value || 0) * 100)}%`
-const confidenceClass = (value) => {
-  const score = value || 0
-  if (score >= 0.75) return 'confidence-high'
-  if (score >= 0.45) return 'confidence-mid'
-  return 'confidence-low'
+const formatConfidence = (v) => `${Math.round((v || 0) * 100)}%`
+const confidenceClass = (v) => {
+  const s = v || 0
+  if (s >= 0.75) return 'conf-high'
+  if (s >= 0.45) return 'conf-mid'
+  return 'conf-low'
 }
-
-const formatPath = (path) => Array.isArray(path) ? path.join(' ') : path
 
 const useQuestion = (q) => {
   inputMessage.value = q
   sendMessage()
 }
 
-const clearChat = () => {
-  messages.value = []
+const clearChat = () => { messages.value = [] }
+
+// 引用定位：取 source chunk 中的关键短语，在 PDF 内搜索并跳转
+const locateSource = (chunk) => {
+  if (!chunk) return
+  const cleaned = String(chunk).replace(/\s+/g, ' ').trim()
+  const keyword = cleaned.length > 60 ? cleaned.slice(0, 60) : cleaned
+  if (pdfReaderRef.value && pdfReaderRef.value.searchInDoc) {
+    pdfReaderRef.value.searchInDoc(keyword.slice(0, 40))
+  }
+}
+
+// 追问：基于风险提示，建议一个更聚焦的追问问题
+const askFollowUp = (warnings) => {
+  const first = warnings?.[0] || '该回答的证据可能不足'
+  inputMessage.value = `关于"${first.slice(0, 60)}"，能否给出更具体的实验证据？`
+  sendMessage()
+}
+
+const scrollToBottom = () => {
+  if (chatContainer.value) chatContainer.value.scrollTop = chatContainer.value.scrollHeight
 }
 
 const sendMessage = async () => {
   if (!inputMessage.value.trim() || isChatting.value) return
-  
   const content = inputMessage.value
   inputMessage.value = ''
   isChatting.value = true
-  
+
   messages.value.push({ role: 'user', content })
   messages.value.push(createAssistantMessage())
-  
   nextTick(() => scrollToBottom())
-  
+
   try {
     const lastMsg = messages.value[messages.value.length - 1]
     const stream = api.chatStream(content)
     activeStream.value = stream
     for await (const event of stream) {
-      if (event.chunk) {
-        lastMsg.content += event.chunk
-      }
+      if (event.chunk) lastMsg.content += event.chunk
       if (event.__done || event.done) {
-        lastMsg.routeType = event.route_type || lastMsg.routeType
+        lastMsg.routeType = event.route_type || 'general'
         lastMsg.confidence = event.confidence || 0
         lastMsg.warnings = event.warnings || []
-        lastMsg.evidenceSummary = event.evidence_summary || []
         lastMsg.reasoningTrace = event.reasoning_trace || []
-        lastMsg.reasoningPaths = event.reasoning_paths || []
-        lastMsg.claimNodes = event.claim_nodes || []
-        lastMsg.evidenceNodes = event.evidence_nodes || []
-        lastMsg.resultNodes = event.result_nodes || []
         lastMsg.sourceChunks = event.source_chunks || []
-        lastMsg.showEvidence = !!lastMsg.evidenceSummary.length
         lastMsg.showWarnings = !!lastMsg.warnings.length
-        lastMsg.showProofGraph = !!(lastMsg.reasoningPaths.length || lastMsg.claimNodes.length || lastMsg.evidenceNodes.length || lastMsg.resultNodes.length)
       }
       scrollToBottom()
     }
@@ -328,273 +273,346 @@ const sendMessage = async () => {
 }
 
 const cancelChat = () => {
-  if (activeStream.value?.cancel) {
-    activeStream.value.cancel()
-  }
+  if (activeStream.value?.cancel) activeStream.value.cancel()
   isChatting.value = false
   activeStream.value = null
-  // 追加提示
-  const lastMsg = messages.value[messages.value.length - 1]
-  if (lastMsg?.role === 'assistant' && lastMsg.content) {
-    lastMsg.content += '\n\n*— 已停止生成 —*'
+  const last = messages.value[messages.value.length - 1]
+  if (last?.role === 'assistant' && last.content) {
+    last.content += '\n\n*— 已停止生成 —*'
   }
 }
 
-const scrollToBottom = () => {
-  if (chatContainer.value) {
-    chatContainer.value.scrollTop = chatContainer.value.scrollHeight
-  }
-}
-
-// 加载历史对话和建议问题
 onMounted(async () => {
-    if (store.documentInfo?.document_id) {
-        try {
-            const suggestionsRes = await api.getSuggestions()
-            if (suggestionsRes.questions) {
-                suggestedQuestions.value = suggestionsRes.questions
-            }
-            const res = await api.getCurrentHistoryChat()
-            if (res.chat_history) {
-                messages.value = res.chat_history.map(normalizeHistoryMessage)
-                nextTick(() => scrollToBottom())
-            }
-        } catch(e) {
-            console.error("加载数据失败", e)
-        }
+  if (store.documentInfo?.document_id) {
+    try {
+      const s = await api.getSuggestions()
+      if (s.questions) suggestedQuestions.value = s.questions
+      const r = await api.getCurrentHistoryChat()
+      if (r.chat_history) {
+        messages.value = r.chat_history.map(normalizeHistoryMessage)
+        nextTick(() => scrollToBottom())
+      }
+    } catch (e) {
+      console.error('加载数据失败', e)
     }
-    
-    // 处理从标注页传来的问题
-    if (store.pendingQuestion) {
-        inputMessage.value = store.pendingQuestion
-        store.pendingQuestion = ''
-        await nextTick()
-        sendMessage()
-    }
+  }
+  if (store.pendingQuestion) {
+    inputMessage.value = store.pendingQuestion
+    store.pendingQuestion = ''
+    await nextTick()
+    sendMessage()
+  }
 })
 </script>
 
 <style scoped>
-.toolbar-glass {
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+.chat-page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
-
-/* Empty state icon */
-.empty-icon-wrapper {
-  width: 80px;
-  height: 80px;
-  border-radius: 24px;
+.chat-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+.chat-empty-wrap {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(14, 165, 233, 0.08);
-  border: 1px solid rgba(14, 165, 233, 0.12);
+  background: var(--bg-inset);
 }
 
-/* Welcome */
+/* PDF 面板 */
+.pdf-pane {
+  width: 46%;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-default);
+  background: var(--bg-inset);
+}
+
+/* 问答面板 */
+.qa-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+}
+.qa-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+
+/* 欢迎 */
+.qa-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+}
 .welcome-icon {
   width: 56px;
   height: 56px;
-  border-radius: 18px;
+  border-radius: 1.1rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.1), rgba(99, 102, 241, 0.1));
-  border: 1px solid rgba(14, 165, 233, 0.1);
+  color: var(--accent-1);
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  margin-bottom: 1rem;
 }
-
-/* Suggestion chips */
-.suggestion-chip {
+.welcome-title { font-size: 1rem; font-weight: 600; color: var(--text-heading); margin-bottom: 0.3rem; }
+.welcome-sub { font-size: 0.8rem; color: var(--text-muted); }
+.suggestions {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px 16px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  color: rgba(203, 213, 225, 0.9);
-  font-size: 13px;
-  line-height: 1.5;
-  transition: all 0.3s;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 100%;
+  max-width: 440px;
+  margin-top: 1.5rem;
+}
+.suggestion {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   text-align: left;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  cursor: pointer;
+  transition: all 0.2s;
 }
-
-.suggestion-chip:hover {
-  background: rgba(14, 165, 233, 0.08);
-  border-color: rgba(14, 165, 233, 0.2);
-  color: white;
-  transform: translateX(4px);
+.suggestion:hover {
+  color: var(--text-heading);
+  border-color: var(--border-accent);
+  background: rgba(56, 189, 248, 0.06);
 }
+.suggestion svg { color: var(--accent-1); flex-shrink: 0; }
 
-/* Avatar */
+/* 消息 */
+.msg-list { display: flex; flex-direction: column; gap: 1.25rem; }
+.msg-row {
+  display: flex;
+  gap: 0.7rem;
+  max-width: 88%;
+  animation: fadeIn 0.3s ease-out;
+}
+.msg-row.from-user {
+  flex-direction: row-reverse;
+  margin-left: auto;
+}
 .avatar {
   width: 32px;
   height: 32px;
-  border-radius: 10px;
+  border-radius: 0.6rem;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
-
 .avatar-user {
-  background: linear-gradient(135deg, #0ea5e9, #6366f1);
-  color: white;
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+  color: #fff;
 }
-
 .avatar-ai {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #94a3b8;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  color: var(--text-muted);
 }
 
-/* Message bubbles */
-.message-column {
+.msg-col {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: 80%;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.bubble {
+  padding: 0.85rem 1.1rem;
+  border-radius: 0.9rem;
+  font-size: 0.85rem;
+}
+.bubble-user {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  color: var(--text-primary);
+  border-bottom-right-radius: 0.25rem;
+}
+.bubble-ai {
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  border-bottom-left-radius: 0.25rem;
 }
 
-.message-bubble {
-  max-width: 100%;
-  padding: 12px 16px;
-  border-radius: 16px;
+.typing-dots { display: flex; gap: 4px; padding: 0.2rem 0; }
+.typing-dots span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent-1);
+  animation: typing 1.2s infinite ease-in-out;
 }
-
-.message-user {
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.15), rgba(99, 102, 241, 0.12));
-  border: 1px solid rgba(14, 165, 233, 0.15);
-  border-bottom-right-radius: 4px;
-  color: rgba(226, 232, 240, 0.95);
-}
-
-.message-ai {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-bottom-left-radius: 4px;
-  color: rgba(203, 213, 225, 0.9);
-}
-
-/* Typing indicator */
-.typing-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: rgba(14, 165, 233, 0.6);
-  animation: typing-bounce 1.2s ease-in-out infinite;
-}
-
-@keyframes typing-bounce {
+.typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-  30% { transform: translateY(-6px); opacity: 1; }
+  30% { transform: translateY(-5px); opacity: 1; }
 }
 
-/* Input area */
-.input-wrapper {
-  position: relative;
+/* Meta card */
+.meta-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  font-size: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.meta-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.meta-pill {
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.68rem;
+  color: var(--accent-1);
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+}
+.conf-high { color: var(--positive); background: rgba(52, 211, 153, 0.08); border-color: rgba(52, 211, 153, 0.2); }
+.conf-mid { color: var(--warning); background: rgba(251, 191, 36, 0.08); border-color: rgba(251, 191, 36, 0.2); }
+.conf-low { color: var(--danger); background: rgba(248, 113, 113, 0.08); border-color: rgba(248, 113, 113, 0.2); }
+
+.meta-toggle {
   display: flex;
   align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
 }
+.meta-toggle:hover { color: var(--text-heading); }
+.meta-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.meta-warn {
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.5rem;
+  font-size: 0.72rem;
+  color: var(--warning);
+  background: rgba(251, 191, 36, 0.06);
+}
+.reasoning-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+.source-list { display: flex; flex-direction: column; gap: 0.35rem; }
+.source-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.5rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  background: var(--bg-inset);
+  border-left: 2px solid var(--accent-1);
+}
+.source-text { flex: 1; line-height: 1.5; }
+.source-locate {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.4rem;
+  font-size: 0.68rem;
+  color: var(--accent-1);
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.source-locate:hover { background: rgba(56, 189, 248, 0.16); }
 
+.followup-row { display: flex; }
+.followup-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.4rem;
+  font-size: 0.7rem;
+  color: var(--accent-1);
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.followup-btn:hover { background: rgba(56, 189, 248, 0.16); }
+
+/* 输入区 */
+.input-zone {
+  padding: 0.9rem 1.25rem 0.8rem;
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-glass);
+}
+.input-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: 0.9rem;
+  padding: 0.35rem;
+  transition: border-color 0.2s;
+}
+.input-box:focus-within { border-color: var(--border-accent); }
 .chat-input {
-  width: 100%;
-  padding: 14px 52px 14px 20px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: white;
-  font-size: 14px;
+  flex: 1;
+  background: transparent;
+  border: none;
   outline: none;
-  transition: all 0.3s;
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  padding: 0.55rem 0.7rem;
 }
-
-.chat-input:focus {
-  border-color: rgba(14, 165, 233, 0.4);
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
-}
-
-.chat-input::placeholder {
-  color: rgba(100, 116, 139, 0.6);
-}
-
+.chat-input::placeholder { color: var(--text-muted); }
 .send-btn {
-  position: absolute;
-  right: 6px;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
+  width: 38px;
+  height: 38px;
+  border-radius: 0.7rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
-  background: linear-gradient(135deg, #0ea5e9, #6366f1);
-  transition: all 0.3s;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+  border: none;
   cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
 }
-
-.send-btn:hover:not(:disabled) {
-  transform: scale(1.05);
-  box-shadow: 0 4px 15px rgba(14, 165, 233, 0.4);
-}
-
-.send-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-.send-btn-cancel {
-  background: linear-gradient(135deg, #ef4444, #f97316) !important;
-  opacity: 1 !important;
-  cursor: pointer !important;
-  animation: cancel-pulse 1.5s ease-in-out infinite;
-}
-.send-btn-cancel:hover {
-  box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4) !important;
-}
-@keyframes cancel-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.3); }
-  50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
-}
-
-.btn-glow {
-  display: inline-flex;
-  align-items: center;
-  font-weight: 600;
-  color: white;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #0ea5e9, #6366f1);
-  transition: all 0.3s;
-}
-
-.btn-glow:hover {
-  box-shadow: 0 8px 25px rgba(14, 165, 233, 0.4);
-  transform: translateY(-2px);
-}
-
-/* Scrollbar */
-.custom-scrollbar::-webkit-scrollbar { width: 5px; }
-.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.2); border-radius: 3px; }
-.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.4); }
-
-/* Source cards */
-.source-card {
-  padding: 10px 14px;
-  border-radius: 10px;
-  background: rgba(14, 165, 233, 0.04);
-  border: 1px solid rgba(14, 165, 233, 0.1);
-  max-width: 80%;
-}
-.source-badge {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: rgba(14, 165, 233, 0.1);
-  color: rgba(14, 165, 233, 0.8);
-  white-space: nowrap;
+.send-btn:hover:not(:disabled) { transform: scale(1.05); box-shadow: var(--shadow-glow); }
+.send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.send-btn-stop { background: linear-gradient(135deg, #ef4444, #f97316); }
+.input-hint {
+  text-align: center;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-top: 0.45rem;
 }
 </style>

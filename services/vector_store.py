@@ -113,11 +113,11 @@ class VectorStoreService:
         获取 Chroma VectorStore 实现。
         """
         try:
-            from langchain_community.vectorstores import Chroma  # type: ignore
+            from langchain_chroma import Chroma  # type: ignore
             return Chroma
         except Exception as e:  # pragma: no cover
             raise ImportError(
-                "未找到 Chroma VectorStore 实现。请确认已安装 `langchain-community` 且版本包含 Chroma。"
+                "未找到 Chroma VectorStore 实现。请运行 `pip install -U langchain-chroma`。"
             ) from e
 
     def _split_text(self, text: str, chunk_size: int, chunk_overlap: int) -> List[str]:

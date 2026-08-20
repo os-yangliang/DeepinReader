@@ -1,27 +1,26 @@
-# === 核心框架 ===
-fastapi>=0.100.0
-uvicorn>=0.20.0
-python-multipart>=0.0.5
-python-dotenv>=1.0.0
+# === 核心框架（锁定到当前已验证的版本）===
+fastapi==0.127.0
+uvicorn==0.40.0
+python-multipart==0.0.21
+python-dotenv==1.1.0
 
 # === LangChain + LLM ===
-langchain>=0.2.0
-langchain-core>=0.2.0
-langchain-community>=0.2.0
-langchain-openai>=0.1.0
-langchain-text-splitters>=0.2.0
-langchain-chroma>=0.1.0
-langgraph>=0.2.0
+langchain==1.2.0
+langchain-core==1.2.5
+langchain-community==0.4.1
+langchain-openai==1.1.6
+langchain-text-splitters==1.1.0
+langchain-chroma==1.1.0
+langgraph==1.0.5
 
 # === 向量数据库 & 检索 ===
-chromadb>=0.4.0
-sentence-transformers>=2.0.0
-rank-bm25>=0.2.2
+chromadb==1.4.0
+sentence-transformers==5.2.0
+rank-bm25==0.2.2
 
 # === 文档解析 ===
-PyMuPDF>=1.23.0
-python-docx>=1.0.0
+PyMuPDF==1.27.2.3
+python-docx==1.2.0
 
-# === 网络搜索 ===
-duckduckgo_search>=5.0.0
-
+# === 网络搜索（可选；代码优先使用 ddgs，其次 duckduckgo_search）===
+ddgs>=9.0.0

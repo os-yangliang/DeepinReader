@@ -1,81 +1,49 @@
 <template>
-  <div class="max-w-7xl mx-auto">
-    <div class="flex items-center justify-between mb-8">
-      <div class="flex items-center gap-3">
-        <div class="icon-wrapper">
-          <Clock :size="20" class="text-primary-400" />
-        </div>
-        <div>
-          <h1 class="text-2xl font-bold text-white">历史记录</h1>
-          <p class="text-gray-500 text-xs mt-0.5">查看和管理已分析的论文</p>
-        </div>
-      </div>
-      <button @click="refreshList" class="action-btn flex items-center gap-2">
-        <RefreshCw :size="14" />
-        刷新列表
-      </button>
-    </div>
+  <div class="history-page">
+    <PageToolbar :icon="Clock" title="历史记录" subtitle="查看和管理已分析的论文" :accent="'var(--accent-1)'">
+      <template #actions>
+        <button class="btn-secondary" @click="refreshList">
+          <RefreshCw :size="14" /> 刷新列表
+        </button>
+      </template>
+    </PageToolbar>
 
-    <div class="glass-card rounded-2xl overflow-hidden border border-white/5">
-      <!-- Loading -->
-      <div v-if="loading" class="p-16 text-center">
-        <Loader2 :size="24" class="text-primary-400 animate-spin mx-auto mb-3" />
-        <p class="text-gray-500 text-sm">加载中...</p>
-      </div>
-      
-      <!-- Empty state -->
-      <div v-else-if="historyList.length === 0" class="p-16 text-center">
-        <div class="empty-icon-wrapper mx-auto mb-4">
-          <Inbox :size="32" class="text-gray-600" />
+    <div class="history-body">
+      <div class="history-inner">
+        <div v-if="loading" class="loading-wrap">
+          <Loader2 :size="24" class="animate-spin text-accent" />
+          <p>加载中...</p>
         </div>
-        <h3 class="text-lg font-semibold text-white mb-2">暂无历史记录</h3>
-        <p class="text-gray-400 text-sm mb-6">上传并分析论文后，记录将显示在这里</p>
-        <router-link to="/analyze" class="btn-glow px-6 py-2.5 text-sm inline-flex items-center gap-2">
-          <Upload :size="16" />
-          去分析论文
-        </router-link>
-      </div>
 
-      <!-- Table -->
-      <div v-else>
-        <div class="grid gap-3 p-4">
-          <div v-for="item in historyList" :key="item.id" 
-               class="history-card group">
-            <div class="flex items-center gap-4 flex-1 min-w-0">
-              <!-- 文件图标 -->
-              <div class="file-icon">
-                <FileText :size="18" class="text-primary-400/70" />
-              </div>
-              
-              <!-- 文件信息 -->
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="text-sm font-medium text-white truncate">{{ item.filename }}</span>
-                </div>
-                <div class="flex items-center gap-3 text-xs text-gray-500">
-                  <span v-if="item.title" class="truncate max-w-[200px]" :title="item.title">{{ item.title }}</span>
-                  <span class="flex items-center gap-1"><FileText :size="11" /> {{ item.page_count }}页</span>
-                  <span class="flex items-center gap-1"><Type :size="11" /> {{ (item.word_count / 1000).toFixed(1) }}k字</span>
-                  <span class="flex items-center gap-1"><Calendar :size="11" /> {{ formatDate(item.analyzed_at) }}</span>
-                </div>
+        <EmptyState
+          v-else-if="historyList.length === 0"
+          :icon="Inbox"
+          title="暂无历史记录"
+          description="上传并分析论文后，记录将显示在这里"
+        >
+          <router-link to="/analyze" class="btn-primary"><Upload :size="16" /> 去分析论文</router-link>
+        </EmptyState>
+
+        <div v-else class="history-list">
+          <div v-for="item in historyList" :key="item.id" class="history-card card card-hover">
+            <div class="file-icon">
+              <FileText :size="18" />
+            </div>
+            <div class="file-info">
+              <p class="file-name">{{ item.filename }}</p>
+              <div class="file-meta">
+                <span v-if="item.title" class="file-title" :title="item.title">{{ item.title }}</span>
+                <span><FileText :size="11" /> {{ item.page_count }} 页</span>
+                <span><Type :size="11" /> {{ (item.word_count / 1000).toFixed(1) }}k 字</span>
+                <span><Calendar :size="11" /> {{ formatDate(item.analyzed_at) }}</span>
               </div>
             </div>
-            
-            <!-- 操作按钮 -->
-            <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button 
-                @click="loadHistory(item.id)" 
-                class="action-btn-sm text-primary-400 hover:bg-primary-500/10"
-              >
-                <ExternalLink :size="14" />
-                打开
+            <div class="file-actions">
+              <button class="btn-ghost text-accent" @click="loadHistory(item.id)">
+                <ExternalLink :size="14" /> 打开
               </button>
-              <button 
-                @click="deleteHistory(item.id)" 
-                class="action-btn-sm text-red-400 hover:bg-red-500/10"
-              >
-                <Trash2 :size="14" />
-                删除
+              <button class="btn-ghost text-danger" @click="deleteHistory(item.id)">
+                <Trash2 :size="14" /> 删除
               </button>
             </div>
           </div>
@@ -90,9 +58,8 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
 import { store } from '../store'
-import { 
-  Clock, RefreshCw, Loader2, Inbox, Upload, FileText, Type, 
-  Calendar, ExternalLink, Trash2 
+import {
+  Clock, RefreshCw, Loader2, Inbox, Upload, FileText, Type, Calendar, ExternalLink, Trash2,
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -147,91 +114,56 @@ onMounted(() => refreshList())
 </script>
 
 <style scoped>
-.icon-wrapper {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(14, 165, 233, 0.08);
-  border: 1px solid rgba(14, 165, 233, 0.12);
+.history-page { height: 100vh; display: flex; flex-direction: column; }
+.history-body { flex: 1; overflow-y: auto; }
+.history-inner {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
 }
 
-.empty-icon-wrapper {
-  width: 72px;
-  height: 72px;
-  border-radius: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+.loading-wrap {
+  display: flex; flex-direction: column; align-items: center; gap: 0.8rem;
+  padding: 4rem 0; color: var(--text-muted); font-size: 0.82rem;
 }
+.text-accent { color: var(--accent-1); }
+.text-danger { color: var(--danger); }
 
-.btn-glow {
-  font-weight: 600;
-  color: white;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #0ea5e9, #6366f1);
-  transition: all 0.3s;
-}
-.btn-glow:hover {
-  box-shadow: 0 8px 25px rgba(14, 165, 233, 0.4);
-  transform: translateY(-2px);
-}
-
-.action-btn {
-  padding: 8px 16px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(148, 163, 184, 0.8);
-  font-size: 13px;
-  transition: all 0.2s;
-}
-.action-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: white;
-}
-
+.history-list { display: flex; flex-direction: column; gap: 0.75rem; }
 .history-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  transition: all 0.3s;
-}
-
-.history-card:hover {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
-  transform: translateX(4px);
+  display: flex; align-items: center; gap: 0.9rem;
+  padding: 1rem 1.25rem;
 }
 
 .file-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(14, 165, 233, 0.06);
-  border: 1px solid rgba(14, 165, 233, 0.1);
-  flex-shrink: 0;
+  width: 42px; height: 42px; border-radius: 0.75rem;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  color: var(--accent-1); background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.14);
+}
+.file-info { flex: 1; min-width: 0; }
+.file-name {
+  font-size: 0.88rem; font-weight: 500; color: var(--text-heading);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.file-meta {
+  display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap;
+  margin-top: 0.35rem; font-size: 0.72rem; color: var(--text-muted);
+}
+.file-meta span { display: inline-flex; align-items: center; gap: 0.25rem; }
+.file-title {
+  max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
-.action-btn-sm {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
-  transition: all 0.2s;
+.file-actions {
+  display: flex; gap: 0.3rem; flex-shrink: 0;
+  opacity: 0; transition: opacity 0.18s;
 }
+.history-card:hover .file-actions { opacity: 1; }
+
+.text-accent { color: var(--accent-1); }
+.text-danger { color: var(--danger); }
+.text-muted { color: var(--text-muted); }
+.animate-spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

@@ -1,151 +1,113 @@
 <template>
-  <div class="max-w-7xl mx-auto">
-    <!-- 头部 -->
-    <div class="text-center mb-6">
-      <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/20 mb-3">
-        <FlaskConical :size="14" class="text-purple-400" />
-        <span class="text-xs font-medium text-purple-300">AI Research Lab</span>
-      </div>
-      <h1 class="text-3xl font-display font-bold text-heading mb-1">🧪 虚拟课题组</h1>
-      <p class="text-secondary text-sm">AI 课题组围绕论文展开学术讨论，挖掘新 Idea，产出研究提案</p>
-    </div>
+  <div class="lab-page">
+    <PageToolbar :icon="FlaskConical" title="虚拟课题组" subtitle="AI 多角色学术研讨" :accent="'var(--accent-3)'" />
 
-    <!-- 未加载文档提示 -->
-    <div v-if="!store.documentInfo" class="card p-12 text-center">
-      <Upload :size="48" class="mx-auto mb-4 text-muted opacity-40" />
-      <p class="text-secondary mb-2">请先上传并分析论文</p>
-      <p class="text-muted text-sm">课题组需要论文的分析结果作为讨论基础</p>
-      <router-link to="/" class="inline-flex items-center gap-2 mt-4 px-4 py-2 rounded-lg bg-primary-500/20 text-primary-400 hover:bg-primary-500/30 transition-colors text-sm">
-        <Upload :size="14" /> 去上传论文
-      </router-link>
-    </div>
+    <div class="lab-body">
+      <div class="lab-inner">
+        <!-- 未加载文档 -->
+        <div v-if="!store.documentInfo" class="lab-empty">
+          <EmptyState :icon="Upload" title="请先上传并分析论文" description="课题组需要论文的分析结果作为讨论基础">
+            <router-link to="/" class="btn-primary"><Upload :size="15" /> 去上传论文</router-link>
+          </EmptyState>
+        </div>
 
-    <!-- 主内容 -->
-    <div v-else>
+        <template v-else>
+          <!-- 控制栏 -->
+          <div v-if="!isDiscussing && !isFinished" class="card control-card">
+            <div class="control-head">
+              <h3>开始课题组讨论</h3>
+              <p>论文：{{ store.documentInfo?.title || store.documentInfo?.filename || '未知' }}</p>
+            </div>
 
-      <!-- 控制栏（未开始时显示） -->
-      <div v-if="!isDiscussing && !isFinished" class="card p-5 mb-5">
-        <div class="flex items-center gap-4 mb-3">
-          <div class="flex-1">
-            <h3 class="text-heading font-semibold text-sm">开始课题组讨论</h3>
-            <p class="text-muted text-xs mt-0.5">论文：{{ store.documentInfo?.title || store.documentInfo?.filename || '未知' }}</p>
+            <div class="mode-grid">
+              <button @click="mode = 'quick'" class="mode-card" :class="{ active: mode === 'quick' }">
+                <div class="mode-title"><Zap :size="14" class="text-amber" /> 快速模式</div>
+                <p>3 个阶段，约 3 分钟</p>
+              </button>
+              <button @click="mode = 'deep'" class="mode-card" :class="{ active: mode === 'deep' }">
+                <div class="mode-title"><Brain :size="14" class="text-violet" /> 深度模式</div>
+                <p>5 个阶段，约 6 分钟</p>
+              </button>
+            </div>
+
+            <label class="field-label">关注方向（可选）</label>
+            <input v-model="userFocus" placeholder="例如：将该方法应用到医学图像分析" class="input" />
+
+            <button @click="startDiscussion" class="lab-start-btn">
+              <FlaskConical :size="15" /> 开始课题组讨论
+            </button>
           </div>
-        </div>
 
-        <div class="flex gap-3 mb-3">
-          <button @click="mode = 'quick'" class="flex-1 p-3 rounded-xl border transition-all text-left"
-            :class="mode === 'quick' ? 'border-primary-500/50 bg-primary-500/10' : 'border-border bg-surface hover:border-primary-500/30'">
-            <div class="flex items-center gap-2 mb-0.5">
-              <Zap :size="14" class="text-amber-400" />
-              <span class="text-heading font-medium text-xs">快速模式</span>
+          <!-- 进度条 -->
+          <div v-if="isDiscussing || isFinished" class="phase-row">
+            <div v-for="(phase, idx) in phaseList" :key="phase.id"
+              class="phase-chip"
+              :class="phaseChipClass(phase.id)">
+              <Check v-if="completedPhases.has(phase.id)" :size="12" />
+              <Loader v-else-if="currentPhase === phase.id" :size="12" class="animate-spin" />
+              <span v-else class="phase-num">{{ idx + 1 }}</span>
+              <span>{{ phase.label }}</span>
             </div>
-            <p class="text-muted text-[10px]">3 个阶段，约 3 分钟</p>
-          </button>
-          <button @click="mode = 'deep'" class="flex-1 p-3 rounded-xl border transition-all text-left"
-            :class="mode === 'deep' ? 'border-primary-500/50 bg-primary-500/10' : 'border-border bg-surface hover:border-primary-500/30'">
-            <div class="flex items-center gap-2 mb-0.5">
-              <Brain :size="14" class="text-purple-400" />
-              <span class="text-heading font-medium text-xs">深度模式</span>
-            </div>
-            <p class="text-muted text-[10px]">5 个阶段，约 6 分钟</p>
-          </button>
-        </div>
-
-        <div class="mb-3">
-          <label class="text-[10px] text-muted block mb-1">关注方向（可选）</label>
-          <input v-model="userFocus" placeholder="例如：将该方法应用到医学图像分析"
-            class="w-full px-3 py-2 rounded-lg bg-input border border-border text-xs text-heading placeholder:text-muted focus:outline-none focus:border-primary-500/50" />
-        </div>
-
-        <button @click="startDiscussion"
-          class="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-medium text-sm hover:from-purple-500 hover:to-indigo-500 transition-all flex items-center justify-center gap-2">
-          <FlaskConical :size="14" /> 开始课题组讨论
-        </button>
-      </div>
-
-      <!-- Phaser 游戏画面 -->
-      <div class="card overflow-hidden mb-4" :class="{ 'ring-1 ring-purple-500/30': isDiscussing }">
-        <div ref="gameContainer" class="game-canvas-wrapper"></div>
-      </div>
-
-      <!-- 讨论进度条 -->
-      <div v-if="isDiscussing || isFinished" class="flex gap-2 mb-4">
-        <div v-for="(phase, idx) in phaseList" :key="phase.id"
-          class="flex-1 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs transition-all"
-          :class="phaseChipClass(phase.id)">
-          <Check v-if="completedPhases.has(phase.id)" :size="12" />
-          <Loader v-else-if="currentPhase === phase.id" :size="12" class="animate-spin" />
-          <span v-else class="w-3 h-3 rounded-full border border-current flex items-center justify-center text-[8px]">{{ idx+1 }}</span>
-          <span>{{ phase.label }}</span>
-        </div>
-      </div>
-
-      <!-- 文字讨论记录（可折叠） -->
-      <details v-if="messages.length > 0" class="card mb-4" :open="!isDiscussing">
-        <summary class="p-4 cursor-pointer text-sm text-secondary hover:text-heading transition-colors flex items-center gap-2">
-          <MessageCircle :size="14" />
-          <span>讨论记录 ({{ messages.filter(m => m.type === 'message').length }} 条发言)</span>
-        </summary>
-        <div class="px-4 pb-4 space-y-3 max-h-96 overflow-y-auto">
-          <template v-for="(msg, idx) in messages" :key="idx">
-            <div v-if="msg.type === 'phase'" class="flex items-center gap-2 my-3">
-              <div class="h-px flex-1 bg-border"></div>
-              <span class="text-[10px] text-muted px-2">{{ msg.label }}</span>
-              <div class="h-px flex-1 bg-border"></div>
-            </div>
-            <div v-else-if="msg.type === 'message'" class="flex gap-2">
-              <div class="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-sm" :class="agentBgClass(msg.agentId)">
-                {{ msg.agentEmoji }}
-              </div>
-              <div class="flex-1 min-w-0">
-                <span class="text-heading text-xs font-medium">{{ msg.agentName }}</span>
-                <div class="text-xs text-secondary mt-0.5 leading-relaxed prose-sm" v-html="renderMarkdown(msg.content)"></div>
-              </div>
-            </div>
-          </template>
-        </div>
-      </details>
-
-      <!-- 研究提案 -->
-      <div v-if="proposal" class="card p-5 border-purple-500/20 bg-purple-500/5 mb-4">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <FileText :size="14" class="text-purple-400" />
-            <span class="text-heading font-semibold text-sm">📝 研究提案</span>
           </div>
-          <button @click="copyProposal"
-            class="px-3 py-1 rounded-lg bg-primary-500/10 text-primary-400 text-xs hover:bg-primary-500/20 transition-colors flex items-center gap-1">
-            <Copy :size="12" /> {{ copied ? '已复制 ✓' : '复制' }}
-          </button>
-        </div>
-        <div class="text-sm text-secondary leading-relaxed prose-content" v-html="renderMarkdown(proposal)"></div>
-      </div>
 
-      <!-- 操作栏 -->
-      <div v-if="isDiscussing || isFinished" class="flex gap-3">
-        <button v-if="isDiscussing" @click="cancelDiscussion"
-          class="px-4 py-2 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors text-xs flex items-center gap-2">
-          <X :size="12" /> 停止讨论
-        </button>
-        <button v-if="isFinished" @click="resetDiscussion"
-          class="px-4 py-2 rounded-lg bg-surface border border-border hover:bg-surface-hover transition-colors text-xs text-secondary flex items-center gap-2">
-          <RefreshCw :size="12" /> 重新讨论
-        </button>
-      </div>
+          <!-- 讨论记录 -->
+          <div v-if="messages.length > 0" class="card discussion-card">
+            <div class="discussion-head">
+              <MessageCircle :size="14" />
+              <span>讨论记录 ({{ messages.filter(m => m.type === 'message').length }} 条发言)</span>
+              <span v-if="isDiscussing" class="streaming-dot"></span>
+            </div>
+            <div class="discussion-body" ref="discussionRef">
+              <template v-for="(msg, idx) in messages" :key="idx">
+                <div v-if="msg.type === 'phase'" class="phase-divider">
+                  <span>{{ msg.label }}</span>
+                </div>
+                <div v-else-if="msg.type === 'message'" class="agent-msg">
+                  <div class="agent-avatar" :class="agentBgClass(msg.agentId)">{{ msg.agentEmoji }}</div>
+                  <div class="agent-body">
+                    <div class="agent-name-row">
+                      <span class="agent-name">{{ msg.agentName }}</span>
+                      <span v-if="msg.agentRole" class="agent-role">{{ msg.agentRole }}</span>
+                    </div>
+                    <div class="markdown-content agent-content" v-html="renderMarkdown(msg.content)"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
 
+          <!-- 研究提案 -->
+          <div v-if="proposal" class="card proposal-card">
+            <div class="proposal-head">
+              <div class="proposal-title"><FileText :size="14" class="text-violet" /> 研究提案</div>
+              <button @click="copyProposal" class="btn-ghost text-accent">
+                <Copy :size="12" /> {{ copied ? '已复制 ✓' : '复制' }}
+              </button>
+            </div>
+            <div class="markdown-content proposal-content" v-html="renderMarkdown(proposal)"></div>
+          </div>
+
+          <!-- 操作栏 -->
+          <div v-if="isDiscussing || isFinished" class="lab-actions">
+            <button v-if="isDiscussing" @click="stopDiscussion" class="btn-danger">
+              <Square :size="12" /> 停止讨论
+            </button>
+            <button v-if="isFinished" @click="resetDiscussion" class="btn-secondary">
+              <RefreshCw :size="13" /> 重新讨论
+            </button>
+          </div>
+        </template>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import Phaser from 'phaser'
-import { FlaskConical, Upload, Zap, Brain, X, RefreshCw, Copy, FileText, Check, Loader, MessageCircle } from 'lucide-vue-next'
+import { ref, reactive, computed, nextTick } from 'vue'
+import { FlaskConical, Upload, Zap, Brain, Square, RefreshCw, Copy, FileText, Check, Loader, MessageCircle } from 'lucide-vue-next'
 import { store } from '../store'
-import { wsRequest } from '../utils/websocket'
+import api from '../api'
 import { renderMarkdown } from '../utils/markdown'
-import LabScene from '../game/LabScene.js'
-import { gameBus } from '../game/GameBridge.js'
 
 const mode = ref('quick')
 const userFocus = ref('')
@@ -156,10 +118,9 @@ const proposal = ref('')
 const copied = ref(false)
 const currentPhase = ref('')
 const completedPhases = reactive(new Set())
-const gameContainer = ref(null)
+const discussionRef = ref(null)
 
-let cancelFn = null
-let phaserGame = null
+let stopped = false
 let currentMsgIndex = -1
 
 const phaseList = computed(() => {
@@ -174,138 +135,82 @@ const phaseList = computed(() => {
 })
 
 function agentBgClass(agentId) {
-  return { advisor: 'bg-blue-500/15', phd_senior: 'bg-emerald-500/15', phd_junior: 'bg-amber-500/15', master: 'bg-purple-500/15' }[agentId] || 'bg-surface'
+  return { advisor: 'bg-blue', phd_senior: 'bg-green', phd_junior: 'bg-amber', master: 'bg-violet' }[agentId] || 'bg-gray'
 }
 
 function phaseChipClass(phaseId) {
-  if (completedPhases.has(phaseId)) return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-  if (currentPhase.value === phaseId) return 'bg-primary-500/10 text-primary-400 border border-primary-500/20'
-  return 'bg-surface text-muted border border-border'
+  if (completedPhases.has(phaseId)) return 'done'
+  if (currentPhase.value === phaseId) return 'current'
+  return ''
 }
 
-// ===== Phaser 初始化 =====
-onMounted(() => {
-  if (gameContainer.value) {
-    initPhaser()
-  }
-})
-
-onBeforeUnmount(() => {
-  if (cancelFn) cancelFn()
-  destroyPhaser()
-})
-
-function initPhaser() {
-  if (phaserGame) return
-
-  phaserGame = new Phaser.Game({
-    type: Phaser.AUTO,
-    parent: gameContainer.value,
-    width: 800,
-    height: 500,
-    backgroundColor: '#0f172a',
-    scene: [LabScene],
-    physics: { default: 'arcade', arcade: { debug: false } },
-    scale: {
-      mode: Phaser.Scale.FIT,
-      autoCenter: Phaser.Scale.CENTER_BOTH,
-    },
-    render: {
-      pixelArt: false,
-      antialias: true,
-    },
+const scrollDiscussion = () => {
+  nextTick(() => {
+    if (discussionRef.value) discussionRef.value.scrollTop = discussionRef.value.scrollHeight
   })
 }
 
-function destroyPhaser() {
-  gameBus.clear()
-  if (phaserGame) {
-    phaserGame.destroy(true)
-    phaserGame = null
-  }
-}
-
-// ===== 讨论控制 =====
 async function startDiscussion() {
   isDiscussing.value = true
   isFinished.value = false
+  stopped.value = false
   messages.length = 0
   proposal.value = ''
   completedPhases.clear()
   currentPhase.value = ''
   currentMsgIndex = -1
 
-  // 重置游戏场景
-  gameBus.emit('reset')
-
-  const { stream, cancel } = wsRequest('lab_discuss', {
-    mode: mode.value,
-    user_focus: userFocus.value,
-  })
-  cancelFn = cancel
-
   try {
-    for await (const data of stream) {
-      if (data.__done) {
-        if (data.proposal) proposal.value = data.proposal
-        gameBus.emit('done')
-        break
-      }
-      if (data.__cancelled) {
-        gameBus.emit('reset')
-        break
-      }
+    for await (const data of api.labDiscussStream({ mode: mode.value, user_focus: userFocus.value })) {
+      if (stopped.value) break
       handleEvent(data)
+      scrollDiscussion()
     }
   } catch (e) {
     messages.push({ type: 'message', agentId: 'system', agentEmoji: '⚠️', agentName: '系统', agentRole: '', content: `讨论出错: ${e.message}` })
   } finally {
     isDiscussing.value = false
     isFinished.value = true
-    cancelFn = null
+    stopped.value = false
   }
 }
 
 function handleEvent(data) {
   const t = data.type
-
-  // 转发给 Phaser
-  gameBus.emit(t, data)
-
   switch (t) {
     case 'phase_start':
       currentPhase.value = data.phase
       messages.push({ type: 'phase', label: data.phase_label })
       break
-
     case 'phase_end':
       completedPhases.add(data.phase)
       break
-
     case 'speaking':
-      messages.push({
-        type: 'message', agentId: data.agent, agentEmoji: data.agent_emoji,
-        agentName: data.agent_name, agentRole: data.agent_role, content: '',
-      })
+      messages.push({ type: 'message', agentId: data.agent, agentEmoji: data.agent_emoji, agentName: data.agent_name, agentRole: data.agent_role, content: '' })
       currentMsgIndex = messages.length - 1
       break
-
     case 'chunk':
-      if (currentMsgIndex >= 0 && messages[currentMsgIndex]) {
-        messages[currentMsgIndex].content += data.content
-      }
+      if (currentMsgIndex >= 0 && messages[currentMsgIndex]) messages[currentMsgIndex].content += data.content
       break
-
     case 'proposal_start':
+      proposal.value = ''
       break
-
     case 'proposal_chunk':
       proposal.value += data.content
+      break
+    case 'proposal':
+      proposal.value = data.content || proposal.value
+      break
+    case 'done':
+      if (data.proposal) proposal.value = data.proposal
+      break
+    case 'error':
+      messages.push({ type: 'message', agentId: 'system', agentEmoji: '⚠️', agentName: '系统', agentRole: '', content: data.message })
       break
   }
 }
 
-function cancelDiscussion() { if (cancelFn) cancelFn() }
+function stopDiscussion() { stopped.value = true }
 
 function resetDiscussion() {
   isDiscussing.value = false
@@ -314,7 +219,6 @@ function resetDiscussion() {
   proposal.value = ''
   completedPhases.clear()
   currentPhase.value = ''
-  gameBus.emit('reset')
 }
 
 function copyProposal() {
@@ -327,36 +231,96 @@ function copyProposal() {
 </script>
 
 <style scoped>
-.card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-default);
-  border-radius: 16px;
+.lab-page { height: 100vh; display: flex; flex-direction: column; }
+.lab-body { flex: 1; overflow-y: auto; }
+.lab-inner { max-width: 880px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+.lab-empty { padding: 4rem 0; }
+
+.control-card { padding: 1.25rem; margin-bottom: 1rem; }
+.control-head { margin-bottom: 1rem; }
+.control-head h3 { font-size: 0.9rem; font-weight: 600; color: var(--text-heading); }
+.control-head p { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem; }
+
+.mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-bottom: 1rem; }
+.mode-card {
+  text-align: left; padding: 0.75rem 0.9rem; border-radius: 0.7rem;
+  background: var(--bg-input); border: 1px solid var(--border-default);
+  cursor: pointer; transition: all 0.18s;
+}
+.mode-card:hover { border-color: var(--border-hover); }
+.mode-card.active { background: rgba(139, 92, 246, 0.08); border-color: rgba(139, 92, 246, 0.35); }
+.mode-title { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; font-weight: 600; color: var(--text-heading); }
+.mode-card p { font-size: 0.68rem; color: var(--text-muted); margin-top: 0.25rem; }
+.text-amber { color: var(--warning); }
+.text-violet { color: var(--accent-3); }
+
+.field-label { display: block; font-size: 0.72rem; color: var(--text-secondary); font-weight: 500; margin: 0.8rem 0 0.4rem; }
+.lab-start-btn {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  margin-top: 1rem; padding: 0.7rem; border-radius: 0.7rem;
+  font-size: 0.85rem; font-weight: 600; color: #fff;
+  background: linear-gradient(135deg, #8b5cf6, #6366f1); border: none;
+  cursor: pointer; transition: all 0.2s;
+}
+.lab-start-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(139, 92, 246, 0.35); }
+
+.phase-row { display: flex; gap: 0.6rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.phase-chip {
+  flex: 1; min-width: 120px; display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.55rem 0.7rem; border-radius: 0.6rem; font-size: 0.75rem;
+  color: var(--text-muted); background: var(--bg-input); border: 1px solid var(--border-default);
+}
+.phase-chip.done { color: var(--positive); background: rgba(52, 211, 153, 0.08); border-color: rgba(52, 211, 153, 0.2); }
+.phase-chip.current { color: var(--accent-3); background: rgba(139, 92, 246, 0.08); border-color: rgba(139, 92, 246, 0.3); }
+.phase-num {
+  width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; font-size: 0.6rem; border: 1px solid currentColor;
 }
 
-.game-canvas-wrapper {
-  width: 100%;
-  aspect-ratio: 800 / 500;
-  border-radius: 16px;
-  overflow: hidden;
+.discussion-card { margin-bottom: 1rem; padding: 0; overflow: hidden; }
+.discussion-head {
+  padding: 0.9rem 1rem; border-bottom: 1px solid var(--border-default);
+  font-size: 0.82rem; color: var(--text-secondary);
+  display: flex; align-items: center; gap: 0.5rem;
 }
-
-.game-canvas-wrapper :deep(canvas) {
-  border-radius: 16px;
-  width: 100% !important;
-  height: 100% !important;
+.streaming-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-3); animation: pulse 1s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.discussion-body { padding: 0 1rem 1rem; max-height: 440px; overflow-y: auto; }
+.phase-divider {
+  display: flex; align-items: center; gap: 0.6rem; margin: 0.9rem 0;
+  font-size: 0.7rem; color: var(--text-muted);
 }
-
-.prose-content :deep(h1), .prose-content :deep(h2), .prose-content :deep(h3) {
-  color: var(--text-heading);
-  margin-top: 0.8em; margin-bottom: 0.4em;
+.phase-divider::before, .phase-divider::after { content: ''; flex: 1; height: 1px; background: var(--border-default); }
+.agent-msg { display: flex; gap: 0.6rem; margin-bottom: 0.8rem; }
+.agent-avatar {
+  width: 30px; height: 30px; border-radius: 0.6rem; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 0.9rem;
 }
-.prose-content :deep(h2) { font-size: 1.05em; }
-.prose-content :deep(h3) { font-size: 0.95em; }
-.prose-content :deep(ul), .prose-content :deep(ol) { padding-left: 1.5em; margin: 0.5em 0; }
-.prose-content :deep(strong) { color: var(--text-heading); }
-.prose-content :deep(table) { width: 100%; border-collapse: collapse; margin: 0.5em 0; font-size: 0.85em; }
-.prose-content :deep(th), .prose-content :deep(td) { padding: 4px 8px; border: 1px solid var(--border-default); }
-.prose-content :deep(th) { background: var(--bg-surface); font-weight: 600; color: var(--text-heading); }
+.bg-blue { background: rgba(56, 189, 248, 0.15); }
+.bg-green { background: rgba(52, 211, 153, 0.15); }
+.bg-amber { background: rgba(251, 191, 36, 0.15); }
+.bg-violet { background: rgba(139, 92, 246, 0.15); }
+.bg-gray { background: var(--bg-input); }
+.agent-body { min-width: 0; flex: 1; }
+.agent-name-row { display: flex; align-items: center; gap: 0.4rem; }
+.agent-name { font-size: 0.76rem; font-weight: 600; color: var(--text-heading); }
+.agent-role { font-size: 0.65rem; color: var(--text-muted); }
+.agent-content { font-size: 0.8rem; margin-top: 0.2rem; }
 
-.prose-sm :deep(p) { margin: 0.3em 0; }
+.proposal-card { padding: 1.25rem; margin-bottom: 1rem; background: rgba(139, 92, 246, 0.04); border-color: rgba(139, 92, 246, 0.18); }
+.proposal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.8rem; }
+.proposal-title { display: flex; align-items: center; gap: 0.4rem; font-size: 0.88rem; font-weight: 600; color: var(--text-heading); }
+.proposal-content { font-size: 0.85rem; }
+.text-accent { color: var(--accent-1); }
+
+.lab-actions { display: flex; gap: 0.6rem; }
+.btn-danger {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0.55rem 1rem; border-radius: 0.7rem; font-size: 0.8rem;
+  color: var(--danger); background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.2); cursor: pointer; transition: all 0.15s;
+}
+.btn-danger:hover { background: rgba(248, 113, 113, 0.15); }
+.animate-spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

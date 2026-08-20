@@ -18,4 +18,9 @@ frontend/dist/
 chroma_db/
 paper_reader.db
 terminals/
+uploads/
+paper_profiles/
+experiments/outputs/
+experiments/data/papers/
+*.tmp
 *.log

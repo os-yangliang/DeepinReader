@@ -1,5 +1,5 @@
 """
-?? Agent - ?? LangGraph ?????????
+论文阅读协调 Agent - 基于 LangGraph 的工作流编排
 """
 from typing import TypedDict, Optional, List, Dict, Literal
 from dataclasses import dataclass, field
@@ -15,7 +15,7 @@ from services.object_indexer import ObjectIndexer
 from agents.parser_agent import ParserAgent
 from agents.summarizer_agent import SummarizerAgent
 from agents.qa_agent import QAAgent, QAResult
-from prompts.templates import PAPER_ANALYSIS_PROMPT, TRANSLATE_PROMPT, CODE_GENERATION_PROMPT, CODE_GENERATION_SYSTEM_PROMPT
+from prompts.templates import PAPER_ANALYSIS_PROMPT, TRANSLATE_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class PaperReaderCoordinator:
         try:
             self.vector_store = vector_store or VectorStoreService()
         except Exception as e:
-            raise ValueError(f"???????????: {str(e)}")
+            raise ValueError(f"向量数据库初始化失败: {str(e)}")
 
         self.parser_agent = ParserAgent(vector_store=self.vector_store, llm_service=self.llm_service)
         self.summarizer_agent = SummarizerAgent(llm_service=self.llm_service) if self.llm_service else None
@@ -96,8 +96,7 @@ class PaperReaderCoordinator:
             elif state.get("file_path"):
                 result = self.parser_agent.parse_document(state["file_path"])
             else:
-                return {**state, "current_stage": "error", "error_message": "?????"}
-
+                return {**state, "current_stage": "error", "error_message": "缺少文件路径或文件内容"}
             if result.success:
                 processing_times = state.get("processing_times", {})
                 processing_times["parse"] = time.time() - start_time
@@ -118,7 +117,7 @@ class PaperReaderCoordinator:
         try:
             parsed_doc = state.get("parsed_doc")
             if not parsed_doc:
-                return {**state, "current_stage": "error", "error_message": "????????"}
+                return {**state, "current_stage": "error", "error_message": "文档未解析，无法生成摘要"}
             result = self.summarizer_agent.generate_summary(parsed_doc)
             processing_times = state.get("processing_times", {})
             processing_times["summarize"] = time.time() - start_time
@@ -144,7 +143,7 @@ class PaperReaderCoordinator:
         try:
             question = state.get("user_question")
             if not question:
-                return {**state, "current_stage": "error", "error_message": "?????"}
+                return {**state, "current_stage": "error", "error_message": "未提供问题"}
             result = self.qa_agent.ask(question)
             processing_times = state.get("processing_times", {})
             processing_times["qa"] = time.time() - start_time
@@ -221,11 +220,11 @@ class PaperReaderCoordinator:
             return ProcessingResult(
                 success=False,
                 stage=final_state.get("current_stage", "unknown"),
-                error_message=final_state.get("error_message") or "????",
+                error_message=final_state.get("error_message") or "未知错误",
                 total_time=total_time,
             )
         except Exception as e:
-            logger.exception("process_document ??")
+            logger.exception("process_document 执行失败")
             return ProcessingResult(success=False, stage="exception", error_message=str(e), total_time=time.time() - start_time)
 
     def ask_question(self, question: str) -> QAResult:
@@ -243,7 +242,7 @@ class PaperReaderCoordinator:
     def parse_and_index(self, file_bytes: bytes, filename: str) -> dict:
         result = self.parser_agent.parse_document_from_bytes(file_bytes, filename)
         if not result.success or not result.parsed_doc:
-            raise ValueError(result.error_message or "??????")
+            raise ValueError(result.error_message or "文档解析失败")
         parsed_doc = result.parsed_doc
         doc_id = result.document_id
         self.current_state = {"document_id": doc_id, "parsed_doc": parsed_doc, "summary": "", "structure_info": result.structure_info, "keywords": "", "current_stage": "indexed"}
@@ -289,7 +288,7 @@ class PaperReaderCoordinator:
         try:
             result = self.parser_agent.parse_document_from_bytes(file_bytes, filename)
             if not result.success or not result.parsed_doc:
-                yield {"stage": "error", "message": result.error_message or "????"}
+                yield {"stage": "error", "message": result.error_message or "文档解析失败"}
                 return
             parsed_doc = result.parsed_doc
             self.current_state = {"document_id": result.document_id, "parsed_doc": parsed_doc, "summary": "", "structure_info": result.structure_info, "keywords": "", "current_stage": "indexed"}
@@ -300,11 +299,6 @@ class PaperReaderCoordinator:
                 yield event
         except Exception as e:
             yield {"stage": "error", "message": str(e)}
-
-    def generate_code_stream(self, user_request: str, target_framework: str, paper_summary: str):
-        prompt = CODE_GENERATION_PROMPT.format(user_request=user_request, target_framework=target_framework, paper_summary=paper_summary)
-        for chunk in self.llm_service.stream_chat(prompt, system_prompt=CODE_GENERATION_SYSTEM_PROMPT):
-            yield chunk
 
     def translate_stream(self, text: str):
         prompt = TRANSLATE_PROMPT.format(text=text)

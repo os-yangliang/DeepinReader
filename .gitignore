@@ -17,6 +17,17 @@ venv/
 # Vector DB / caches
 chroma_db/
 
+# Runtime data (user uploads & structured profiles)
+uploads/
+paper_profiles/
+
+# Experiment runtime outputs & large papers (datasets are tracked)
+experiments/outputs/
+experiments/data/papers/
+
+# Temporary files
+*.tmp
+
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -25,4 +36,5 @@ Thumbs.db
 frontend/node_modules/
 frontend/dist/
 
-
+# Logs
+*.log

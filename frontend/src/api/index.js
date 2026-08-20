@@ -170,26 +170,6 @@ function createWsChatStream(message) {
   return wrappedStream
 }
 
-/**
- * 创建 WS 代码生成流，yield chunk 文本
- */
-function createWsCodeStream(userRequest, targetFramework) {
-  const { stream, cancel, requestId } = wsRequest('code_generate', {
-    user_request: userRequest,
-    target_framework: targetFramework,
-  })
-  const wrappedStream = (async function* () {
-    for await (const item of stream) {
-      if (item.__done || item.__cancelled) return
-      if (item.chunk) yield item.chunk
-    }
-  })()
-  wrappedStream.cancel = cancel
-  wrappedStream.requestId = requestId
-  return wrappedStream
-}
-
-
 // ==================== API ====================
 
 /**
@@ -331,22 +311,17 @@ export const paperAPI = {
     URL.revokeObjectURL(url)
   },
 
-  // 流式代码生成 (WS 优先)
-  codeGenerateStream: (userRequest, targetFramework) => {
-    return withFallback(
-      () => createWsCodeStream(userRequest, targetFramework),
-      () => createSSEStream('/code/generate', {
-        body: { user_request: userRequest, target_framework: targetFramework }
-      })
-    )
-  },
-
   // 论文对比分析 (WS 优先)
   compareStream: (docIds) => {
     return withFallback(
       () => createWsStream('compare', { doc_ids: docIds }),
       () => createSSEEventStream('/compare/stream', { body: { doc_ids: docIds } })
     )
+  },
+
+  // 课题组讨论（SSE 流式，替代 WebSocket）
+  labDiscussStream: ({ mode = 'quick', user_focus = '' } = {}) => {
+    return createSSEEventStream('/lab/discuss/stream', { body: { mode, user_focus } })
   },
 
   getSuggestions: async () => {
@@ -356,11 +331,6 @@ export const paperAPI = {
 
   searchPapers: async (query = '', limit = 10) => {
     const res = await apiClient.post('/search', { query, limit })
-    return res.data
-  },
-
-  generateMindmap: async () => {
-    const res = await apiClient.post('/mindmap')
     return res.data
   },
 
@@ -436,6 +406,18 @@ export const paperAPI = {
 
   getHistoryProfileDetail: async (historyId) => {
     const res = await apiClient.get(`/history/${historyId}/profile/detail`)
+    return res.data
+  },
+
+  // 当前 PDF 目录大纲（阅读器侧边导航）
+  getDocumentToc: async () => {
+    const res = await apiClient.get('/document/toc')
+    return res.data
+  },
+
+  // 当前 PDF 全文搜索（返回匹配页码，用于引用跳转定位）
+  searchDocument: async (q) => {
+    const res = await apiClient.get('/document/search', { params: { q } })
     return res.data
   }
 }

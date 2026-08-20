@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 
@@ -134,6 +134,32 @@ class PaperProfile(BaseModel):
     graph_edges: List[GraphEdge] = Field(default_factory=list)
 
 
+class ReasoningChain(BaseModel):
+    chain_id: str = ""
+    nodes: List[str] = Field(default_factory=list)
+    edge_types: List[str] = Field(default_factory=list)
+    text: str = ""
+    chain_type: str = "general"
+    score: float = 0.0
+    similarity_score: float = 0.0
+    type_match_score: float = 0.0
+    edge_confidence: float = 0.0
+    evidence_strength: float = 0.0
+    completeness: float = 0.0
+
+
+class SufficiencyReport(BaseModel):
+    score: float = 0.0
+    label: str = "insufficient"
+    coverage: float = 0.0
+    support: float = 0.0
+    consistency: float = 0.0
+    missing_penalty: float = 0.0
+    route_match: float = 0.0
+    missing_factors: List[str] = Field(default_factory=list)
+    should_abstain: bool = False
+
+
 class EvidenceBundle(BaseModel):
     route: QuestionRoute = QuestionRoute.GENERAL
     target_claims: List[Claim] = Field(default_factory=list)
@@ -142,6 +168,8 @@ class EvidenceBundle(BaseModel):
     sections: List[PaperSection] = Field(default_factory=list)
     source_chunks: List[str] = Field(default_factory=list)
     missing_information: List[str] = Field(default_factory=list)
+    reasoning_chains: List[ReasoningChain] = Field(default_factory=list)
+    sufficiency: Optional[SufficiencyReport] = None
 
 
 class VerificationReport(BaseModel):
@@ -149,3 +177,24 @@ class VerificationReport(BaseModel):
     supported_points: List[str] = Field(default_factory=list)
     unsupported_points: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+    consistency_score: float = 0.0
+    unsupported_claims: List[str] = Field(default_factory=list)
+    evidence_coverage: float = 0.0
+
+
+class CriticReport(BaseModel):
+    unsupported_claims: List[str] = Field(default_factory=list)
+    omissions_with_evidence: List[str] = Field(default_factory=list)
+    evidence_gaps: List[str] = Field(default_factory=list)
+    misalignment: List[str] = Field(default_factory=list)
+    citation_issues: List[str] = Field(default_factory=list)
+    suggestions: List[str] = Field(default_factory=list)
+    overall_verdict: str = "acceptable"
+    reasoning: str = ""
+
+
+class ArbiterDecision(BaseModel):
+    chosen_answer: str = ""
+    chosen_label: str = "A"
+    reasoning: str = ""
+    confidence: float = 0.5
