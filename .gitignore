@@ -20,8 +20,9 @@ chroma_db/
 # Runtime data (user uploads & structured profiles)
 uploads/
 paper_profiles/
-
+docs/
 # Experiment runtime outputs & large papers (datasets are tracked)
+experiments/
 experiments/outputs/
 experiments/data/papers/
 
